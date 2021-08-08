@@ -1,6 +1,6 @@
 """Interface to the Escea fireplace controller
 
-Interaction mostly through the Controller and Zone classes.
+Interaction through the Controller class.
 """
 
 from .controller import Controller
