@@ -27,12 +27,24 @@ class Controller:
     # DictValue = Union[str, int, float]
     # ControllerData = Dict[str, DictValue]
 
+    class DictEntries(Enum):
+        """Available controller attributes"""
+        HAS_NEW_TIMERS = "HasNewTimers"
+        FIRE_IS_ON = "FireIsOn"
+        FAN_MODE = "FanMode"
+        DESIRED_TEMP = "DesiredTemp"
+        CURRENT_TEMP = "CurrentTemp"
+
+    DictValue = Union[str, int, float, bool, Fan]
+    ControllerData = Dict[DictEntries, DictValue]
+
     REQUEST_TIMEOUT = 5
     """Time to wait for results from server."""
 
     CONNECT_RETRY_TIMEOUT = 20
     """Cool-down period for retrying to connect to the controller"""
 
+    # TODO: Figure out what needs to be done (show "Waiting"?)
     START_STOP_WAIT_TIME = 120
     """Time to wait for fireplace to start up / shut down"""
 
@@ -46,28 +58,31 @@ class Controller:
 
         Usually this is called from the discovery service. If neither
         device UID or address are specified, will search network for
-        exactly one controller. If UID is specified then the addr is
+        exactly one controller. If address is specified then the UID is
         ignored.
 
         Args:
             device_uid: Controller UId as a string (Serial Number of unit)
-                If specified, will search the network for a matching device
             device_addr: Device network address. Usually specified as IP
                 address
 
-            <<device_pin is listed as a discovery reply from fireplaces,
-                but does not seem to be used anywhere>>
 
         Raises:
-            ConnectionAbortedError: If id is not set and more than one Escea
+            ConnectionAbortedError: If address is not set and more than one Escea
                 instance is discovered on the network.
-            ConnectionRefusedError: If no Escea discovered, or no Escea
-                device discovered at the given IP address or UId
+            ConnectionRefusedError: If no Escea fireplace is discovered, or no
+                device discovered at the given IP address, or the UID does not match
         """
         self._ip = device_ip
         self._discovery = discovery
         self._device_uid = device_uid
 
+        """ System settings:
+            on / off
+            fan mode
+            set temperature
+            current temperature
+        """
         self._system_settings = {}  # type: Controller.ControllerData
 
         self._initialised = False
@@ -78,11 +93,11 @@ class Controller:
     async def _initialize(self) -> None:
         """Initialize the controller, does not complete until the system is
         initialised."""
+
         await self._refresh_system(notify=False)
 
         self._initialised = True
 
-        """ Is this needed:? """
         self.discovery.loop.create_task(self._poll_loop())
 
     async def _poll_loop(self) -> None:
@@ -98,8 +113,6 @@ class Controller:
             except ConnectionError as ex:
                 _LOG.debug("Poll failed due to exception %s.", repr(ex))
 
-    """ New code ... needs to be worked out """
-
     @property
     def device_ip(self) -> str:
         """IP Address of the unit"""
@@ -107,7 +120,7 @@ class Controller:
 
     @property
     def device_uid(self) -> str:
-        '''UId of the unit'''
+        """UId of the unit (serial number)"""
         return self._device_uid
 
     @property
@@ -117,54 +130,52 @@ class Controller:
     @property
     def is_on(self) -> bool:
         """True if the system is turned on"""
-        return self._get_system_state('SysOn') == 'on'
+        return self._get_system_state(self.DictEntries.FIRE_IS_ON) == True
 
     async def set_on(self, value: bool) -> None:
-        """Turn the system on or off."""
-        await self._set_system_state(
-            'SysOn', 'SystemON', 'on' if value else 'off')
+        """Turn the system on or off.
+           Async method, await to ensure command revieved by system.
+           Note: After systems receives on or off command, must wait several minutes to be actioned
+        """
+        await self._set_system_state(self.DictEntries.FIRE_IS_ON, value)
 
     @property
     def fan(self) -> 'Fan':
         """The current fan level."""
-        return self.Fan(self._get_system_state('SysFan'))
+        return self.Fan(self._get_system_state(self.DictEntries.FAN_MODE))
 
     async def set_fan(self, value: Fan) -> None:
         """The fan level. 
            Async method, await to ensure command revieved by system.
         """
-        await self._set_system_state(
-            'SysFan', 'SystemFAN', value.value)
+        await self._set_system_state(self.DictEntries.FAN_MODE, value)
 
     @property
-    def temp_setpoint(self) -> Optional[float]:
-        """fireplace setpoint temperature.
+    def desired_temp(self) -> Optional[float]:
+        """fireplace DesiredTemp temperature.
         """
-        return float(self._get_system_state('Setpoint')) or None
+        return float(self._get_system_state(self.DictEntries.DESIRED_TEMP))
 
-    async def set_temp_setpoint(self, value: float):
-        """fireplace setpoint temperature.
+    async def set_desired_temp(self, value: float):
+        """fireplace DesiredTemp temperature.
         This is the unit target temp
         Args:
-            value: Valid settings are between tempMin and tempMax
-            at 1 degree increments
+            value: Valid settings are in range MIN_TEMP..MAX_TEMP
+            at 1 degree increments (will be rounded)
         Raises:
             AttributeError: On setting if the argument value is not valid.
                 Can still be set even if the mode isn't appropriate.
         """
-        if value % 1.0 != 0:
+        degrees = round(value)
+        if degrees < Controller.MIN_TEMP or degrees > Controller.MAX_TEMP:
             raise AttributeError(
-                'SetPoint \'{}\' not rounded to nearest degree'.format(value))
-        if value < self.temp_min or value > self.temp_max:
-            raise AttributeError(
-                'SetPoint \'{}\' is out of range'.format(value))
-        await self._set_system_state(
-            'Setpoint', 'UnitSetpoint', value, str(value))
+                'Desired Temp \'{}\' is out of range'.format(degrees))
+        await self._set_system_state(self.DictEntries.DESIRED_TEMP, degrees)
 
     @property
-    def temp_return(self) -> Optional[float]:
-        """The return, or room, air temperature"""
-        return float(self._get_system_state('Temp')) or None
+    def room_temp(self) -> Optional[float]:
+        """The room air temperature"""
+        return float(self._get_system_state(self.DictEntries.CURRENT_TEMP)) or None
 
     @property
     def temp_min(self) -> float:
@@ -176,18 +187,22 @@ class Controller:
         """The maximum valid target (desired) temperature"""
         return float(Controller.TEMP_MAX)
 
-    # TODO: What is going on here? Get the response command?
     async def _refresh_system(self, notify: bool = True) -> None:
         """Refresh the system settings."""
-        values = await self._get_resource('SystemSettings')
-        if self._device_uid != values['ControllerDeviceUId']:
-            _LOG.error("_refresh_system called with unmatching device ID")
-            return
-
+        values = await self.request_status()
         self._system_settings = values
-
         if notify:
             self._discovery.controller_update(self)
+
+    async def request_status(self):
+        try:
+            async with self._send_command_async(
+                    self, FireplaceMessage.CommandID.STATUS_PLEASE) as response:
+                return await response
+        except (asyncio.TimeoutError) as ex:
+            self._failed_connection(ex)
+            raise ConnectionError("Unable to connect to the controller") \
+                from ex
 
     def _refresh_address(self, address):
         """Called from discovery to update the address"""
@@ -218,6 +233,10 @@ class Controller:
             raise ConnectionError("Unable to connect to the controller") \
                 from self._fail_exception
 
+    # TODO: What to do on failed connection - UDP does not guarantee delivery 
+    # so it is expected... should mark it as disconnected if we get X failures
+    # ... how to code that up?
+
     def _failed_connection(self, ex):
         if self._fail_exception:
             self._fail_exception = ex
@@ -227,80 +246,65 @@ class Controller:
             return
         self._discovery.controller_disconnected(self, ex)
 
-    async def _retry_connection(self) -> None:
-        _LOG.info(
-            "Attempting to reconnect to server uid=%s ip=%s",
-            self.device_uid, self.device_ip)
 
-        try:
-            await self._refresh(notify=False)
+    
+    async def _send_command_async(self, command: FireplaceMessage.CommandID, data: Any) -> Dict:
+        """ Send command via UDP
 
-            self._fail_exception = None
-
-            self._discovery.controller_update(self)
-            self._discovery.controller_reconnected(self)
-        except ConnectionError as ex:
-            # Expected, just carry on.
-            _LOG.warning(
-                "Reconnect attempt for uid=%s failed with exception: %s",
-                self.device_uid, ex.__repr__())
-
-    async def _get_resource(self, resource: str):
-        try:
-            session = self._discovery.session
-            async with session.get(
-                    'http://%s/%s' % (self.device_ip, resource),
-                    timeout=Controller.REQUEST_TIMEOUT) as response:
-                return await response.json(content_type=None)
-        except (asyncio.TimeoutError, aiohttp.ClientError) as ex:
-            self._failed_connection(ex)
-            raise ConnectionError("Unable to connect to the controller") \
-                from ex
-
-    async def _send_command_async(self, command: str, data: Any):
-        # For some reason aiohttp fragments post requests, which causes
-        # the server to fail disgracefully. Implimented rough and dirty
-        # HTTP POST client.
+            Returns received data (for STATUS_PLEASE command)
+        """
         loop = self.discovery.loop
         on_complete = loop.create_future()
         device_ip = self.device_ip
 
-        class _PostProtocol(asyncio.Protocol):
-            def connection_made(self, transport):
-                body = json.dumps({command: data}).encode()
-                header = (
-                    "POST /" + command + " HTTP/1.1\r\n" +
-                    "Host: " + device_ip + "\r\n" +
-                    "Content-Length: " + str(len(body)) + "\r\n" +
-                    "\r\n").encode()
-                _LOG.debug(
-                    "Writing message to " + device_ip + body.decode())
-                transport.write(header + body)
-                self.transport = transport
+        controller_data = {}
 
-            def data_received(self, data):
+        message = FireplaceMessage(command, data)
+
+        class _DatagramProtocol:
+            def __init__(self, message, on_complete):
+                self.message = message
+                self.on_complete = on_complete
+                self.transport = None
+
+            def connection_made(self, transport):
+                self.transport = transport
+                self.transport.sendto(self.message)
+
+            def datagram_received(self, data, addr):
+                response = FireplaceMessage(data)
+                if response != message.expected_response:
+                    _LOG.warning(
+                            "Message response id: %s does not match command id: %s",
+                            response.response_id, command)
+                if response.response_id == FireplaceMessage.ResponseID.STATUS:
+                    self.controller_data = { 
+                        Controller.DictEntries.HAS_NEW_TIMERS : response.has_new_timers,
+                        Controller.DictEntries.FIRE_IS_ON: response.fire_is_on,
+                        Controller.DictEntries.DESIRED_TEMP: response.desired_temp,
+                        Controller.DictEntries.CURRENT_TEMP: response.current_temp
+                    }
+                    if response.fan_boost_is_on:
+                        self.controller_data += {Controller.DictEntries.FAN_MODE, Controller.Fan.FAN_BOOST}
+                    elif response.fire_effect_on:
+                        self.controller_data += {Controller.DictEntries.FAN_MODE, Controller.Fan.FLAME_EFFECT}
+                    else:
+                        self.controller_data += {Controller.DictEntries.FAN_MODE, Controller.Fan.AUTO}
                 self.transport.close()
-                response = data.decode()  # type: str
-                lines = response.split('\r\n', 1)
-                if not lines:
-                    return
-                parts = lines[0].split(' ')
-                if(len(parts) != 3):
-                    return
-                if int(parts[1]) != 200:
-                    on_complete.set_exception(
-                        aiohttp.ClientResponseError(
-                            None, None,
-                            status=int(parts[1]),
-                            message=parts[2]))
-                else:
-                    on_complete.set_result(True)
+
+            def error_received(self, exc):
+                _LOG.warning(
+                        "Error receiving for uid=%s failed with exception: %s",
+                        self.device_uid, exc.__repr__())
+
+            def connection_lost(self, exc):
+                self.on_complete.set_result(True)
 
         try:
             async with timeout(Controller.REQUEST_TIMEOUT) as cm:
-                transport, _ = await loop.create_connection(  # type: ignore
-                    lambda: _PostProtocol(),
-                    self.device_ip, 80)  # mypy: ignore
+                transport, _ = await loop.create_datagram_endpoint(
+                    lambda: _DatagramProtocol(FireplaceMessage(message, data), on_complete),
+                    remote_addr=(device_ip, FireplaceMessage.CONTROLLER_PORT))
 
                 # wait for response to be recieved.
                 await on_complete
@@ -312,6 +316,8 @@ class Controller:
 
             on_complete.result()
 
-        except (OSError, asyncio.TimeoutError, aiohttp.ClientError) as ex:
+            return controller_data
+
+        except (OSError, asyncio.TimeoutError) as ex:
             self._failed_connection(ex)
-            raise ConnectionError("Unable to connect to controller") from ex
+            raise ConnectionError("Unable to send UDP to controller") from ex

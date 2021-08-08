@@ -17,13 +17,11 @@ from .controller import Controller
 
 from .message import FireplaceMessage
 
-CONTROLLER_PORT = 3300
-
 DISCOVERY_TIMEOUT = 5.0
 DISCOVERY_SLEEP = 20.0
 DISCOVERY_RESCAN = 5.0
 
-DISCOVERY_PORT = CONTROLLER_PORT
+DISCOVERY_PORT = FireplaceMessage.CONTROLLER_PORT
 UPDATE_PORT = 9005 # Not sure why this needs to be defined and can't be auto
 
 _LOG = logging.getLogger('pescea.discovery')  # type: Logger
@@ -149,6 +147,8 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
 
         self._tasks = []  # type: List[Future]
 
+        self.search_for_fires = FireplaceMessage(FireplaceMessage.CommandID.SEARCH_FOR_FIRES).bytearray_of
+
     # Async context manager interface
     async def __aenter__(self) -> AbstractDiscoveryService:
         await self.start_discovery()
@@ -255,8 +255,7 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
     def _send_broadcasts(self):
         for broadcast in self._get_broadcasts():
             _LOG.debug("Sending discovery message to addr %s", broadcast)
-            search_for_fires = FireplaceMessage(FireplaceMessage.CommandID.SEARCH_FOR_FIRES)
-            self._transport.sendto(search_for_fires.byte_array_of, (broadcast, DISCOVERY_PORT))
+            self._transport.sendto(self.search_for_fires, (broadcast, DISCOVERY_PORT))
 
     async def _scan_loop(self) -> None:
         assert self._transport, "Should be impossible"
@@ -348,7 +347,7 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
         self._discovery_received(data, addr)
 
     def _discovery_received(self, data, addr):
-        device_ip, port = addr
+        device_ip, _ = addr
         try:
             message = FireplaceMessage(data)
         except ValueError as ex:

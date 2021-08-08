@@ -11,6 +11,9 @@ class FireplaceMessage:
     """ Implements messages to and from the fireplace.
         Refer to Escea Fireplace LAN Comms Spec for details.
     """
+    # Port to use for discovery and integration
+    CONTROLLER_PORT = 3300
+
     # The same message structure is used for commands and responses:
     MESSAGE_LENGTH = 15
     MSG_OFFSET_START_BYTE = 0  # Byte 1: Start Byte code
@@ -25,7 +28,7 @@ class FireplaceMessage:
     DATA_OFFSET_TIMERS = 0       # Data Byte 1: (boolean) Fireplace has new timers (not used)
     DATA_OFFSET_FIRE_ON = 1      # Data Byte 2: (boolean) Fire is On
     DATA_OFFSET_BOOST_ON = 2     # Data Byte 3: (boolean) Fan Boost is on
-    DATA_OFFSET_EFFECT_ON = 3    # Data Byte 4: (boolean) Fan Effect is on
+    DATA_OFFSET_EFFECT_ON = 3    # Data Byte 4: (boolean) Flame Effect is on
     DATA_OFFSET_DESIRED_TEMP = 4 # Data Byte 5: (unsigned int) Desired Temperature
     DATA_OFFSET_CURRENT_TEMP = 5 # Data Byte 6: (unsigned int) Room Temperature
 
@@ -59,6 +62,7 @@ class FireplaceMessage:
         FLAME_EFFECT_OFF_ACK = b'\x60'
         NEW_SET_TEMP_ACK = b'\x66'
         I_AM_A_FIRE = b'\x99'
+
 
     # Acceptable limits when commanding NEW_SET_TEMP:
     MIN_SET_TEMP = 4
@@ -177,7 +181,7 @@ class FireplaceMessage:
         return self._fan_boost_on
 
     @property
-    def fire_effect_on(self) -> bool:
+    def flame_effect(self) -> bool:
         return self._effect_on
 
     @property
@@ -199,6 +203,29 @@ class FireplaceMessage:
     @property
     def crc(self) -> int:
         return self.crc
+
+    @property
+    def expected_response(self) -> ResponseID:
+        if self._id == self.CommandID.STATUS_PLEASE:
+            return self.ResponseID.STATUS
+        elif self._id == self.CommandID.POWER_ON:
+            return self.ResponseID.POWER_ON_ACK
+        elif self._id == self.CommandID.POWER_OFF:
+            return self.ResponseID.POWER_OFF_ACK
+        elif self._id == self.CommandID.SEARCH_FOR_FIRES:
+            return self.ResponseID.I_AM_A_FIRE
+        elif self._id == self.CommandID.FAN_BOOST_ON:
+            return self.ResponseID.FAN_BOOST_ON_ACK
+        elif self._id == self.CommandID.FAN_BOOST_OFF:
+            return self.ResponseID.FAN_BOOST_OFF_ACK
+        elif self._id == self.CommandID.FLAME_EFFECT_ON:
+            return self.ResponseID.FLAME_EFFECT_ON_ACK
+        elif self._id == self.CommandID.FLAME_EFFECT_OFF:
+            return self.ResponseID.FLAME_EFFECT_OFF_ACK
+        elif self._id == self.CommandID.NEW_SET_TEMP:
+            return self.ResponseID.NEW_SET_TEMP_ACK
+        else:
+            raise(ValueError)
 
     @property
     def bytearray_of(self) -> bytearray:
