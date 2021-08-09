@@ -1,29 +1,33 @@
 
 from asyncio import sleep
+from decimal import MAX_EMAX
 
 from asynctest.mock import patch
 
 from pescea import discovery, Controller, Listener
 from pescea.discovery import DiscoveryService
+from pescea.message import FireplaceMessage
 
 from pytest import raises
 
+from .resources import TST_FIREPLACES
 
-@patch.object(DiscoveryService, '_get_broadcasts')
-async def test_broadcast(broadcasts):
-    broadcasts.return_value = []
+
+@patch.object(DiscoveryService, '_get_broadcast')
+async def test_broadcast(broadcast):
+    broadcast.return_value = []
 
     async with discovery():
-        assert broadcasts.called
+        assert broadcast.called
 
 
-@patch.object(DiscoveryService, '_send_broadcasts')
-async def test_messages_sent(send_broadcasts):
+@patch.object(DiscoveryService, '_send_broadcast')
+async def test_messages_sent(send_broadcast):
     async with discovery():
-        assert send_broadcasts.called
+        assert send_broadcast.called
 
 
-@patch.object(DiscoveryService, '_send_broadcasts')
+@patch.object(DiscoveryService, '_send_broadcast')
 async def test_rescan(send):
     async with discovery() as service:
         assert not service.is_closed
@@ -43,9 +47,9 @@ async def test_fail_on_connect(loop, caplog):
     service.connected = False
 
     async with service:
-        service._process_datagram(
-            b'ASPort_12107,Mac_000000001,IP_8.8.8.8,Escea,iLight,iDrate',
-            ('8.8.8.8', 12107))
+        # TODO: Figure out how to stub this / how would it work now?
+        service._datagram.process_received(None, '1.1.1.1')
+        await sleep(0)
         await sleep(0)
 
     assert len(caplog.messages) == 1
@@ -65,85 +69,107 @@ async def test_connection_lost(service, caplog):
     assert service.is_closed
 
 
-async def test_discovery(service):
-    assert len(service.controllers) == 1
-    assert '000000001' in service.controllers
+async def test_discovery(service: DiscoveryService):
+    assert len(service.controllers) == len(TST_FIREPLACES)
 
-    controller = service.controllers['000000001']  # type: Controller
-    assert controller.device_uid == '000000001'
-    assert controller.device_ip == '8.8.8.8'
-    assert controller.mode == Controller.Mode.HEAT
+    for ctl_uid in list(TST_FIREPLACES.keys()):
 
-    # Not updated yet
-    await controller.set_mode(Controller.Mode.COOL)
-    assert controller.sent[0] == ('SystemMODE', 'cool')
-    assert controller.mode == Controller.Mode.HEAT
+        assert ctl_uid in service.controllers
+        controller = service.controllers[ctl_uid]  # type: Controller
+        
+        # Check system settings are update on init
+        assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
+        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == TST_FIREPLACES[ctl_uid]["IPAddress"]
+        assert controller._system_settings[Controller.DictEntries.HAS_NEW_TIMERS] == TST_FIREPLACES[ctl_uid]["HasNewTimers"]
+        assert controller._system_settings[Controller.DictEntries.FIRE_IS_ON] == TST_FIREPLACES[ctl_uid]["FireIsOn"]
+        assert controller._system_settings[Controller.DictEntries.FAN_MODE] == TST_FIREPLACES[ctl_uid]["FanMode"]
+        assert controller._system_settings[Controller.DictEntries.DESIRED_TEMP] == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
+        assert controller._system_settings[Controller.DictEntries.CURRENT_TEMP] == TST_FIREPLACES[ctl_uid]["CurrentTemp"]
 
-    # Now updated
-    await controller.change_system_state('SysMode', 'cool')
-    assert controller.mode == Controller.Mode.COOL
+        # check properties work
+        assert controller.device_ip == TST_FIREPLACES[ctl_uid]["IPAddress"]
+        assert controller.device_uid == ctl_uid
+        assert controller.is_on == TST_FIREPLACES[ctl_uid]["FireIsOn"]
+        assert controller.fan == TST_FIREPLACES[ctl_uid]["FanMode"]
+        assert controller.desired_temp == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
+        assert controller.current_temp == TST_FIREPLACES[ctl_uid]["CurrentTemp"]
+        assert controller.min_temp == FireplaceMessage.MIN_SET_TEMP
+        assert controller.max_temp == FireplaceMessage.MAX_SET_TEMP
+        
+        # check the methods
+
+        await controller.set_on(not controller.is_on)
+        assert controller.is_on != TST_FIREPLACES[ctl_uid]["FireIsOn"]
+
+        for fan_mode in Controller.Fan:
+            await controller.set_fan(fan_mode)
+            assert controller.fan == fan_mode
+
+        for desired_temp in range(int(controller.min_temp),int(controller.max_temp)):
+            await controller.set_desired_temp(float(desired_temp))
+            assert int(controller.desired_temp) == desired_temp
+
+        for test_addr in '1.1.1.1', '2.2.2.2', '3.3.3.3':
+            await controller._refresh_address(test_addr)
+            assert controller.device_ip == test_addr
+
+        # set settings back to test case values
+        await controller.set_on(TST_FIREPLACES[ctl_uid]["FireIsOn"])
+        assert controller.is_on == TST_FIREPLACES[ctl_uid]["FireIsOn"]
+
+        await controller.set_fan(TST_FIREPLACES[ctl_uid]["FanMode"])
+        assert controller.fan == TST_FIREPLACES[ctl_uid]["FanMode"]
+
+        await controller.set_desired_temp(TST_FIREPLACES[ctl_uid]["DesiredTemp"])
+        assert controller.desired_temp == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
+
+        await controller._refresh_address(TST_FIREPLACES[ctl_uid]["IPAddress"])
+        assert controller.device_ip == TST_FIREPLACES[ctl_uid]["IPAddress"]   
 
 
-async def test_legacy_discovery(legacy_service):
-    service = legacy_service
-    
-    assert len(service.controllers) == 1
-    assert '000000001' in service.controllers
+async def test_ip_addr_change(service: DiscoveryService, caplog):
+    assert len(service.controllers) == len(TST_FIREPLACES)
 
-    controller = service.controllers['000000001']  # type: Controller
-    assert controller.device_uid == '000000001'
-    assert controller.device_ip == '8.8.8.8'
-    assert controller.mode == Controller.Mode.HEAT
+    for ctl_uid in list(TST_FIREPLACES.keys()):
 
-    # Not updated yet
-    await controller.set_mode(Controller.Mode.COOL)
-    assert controller.sent[0] == ('SystemMODE', 'cool')
-    assert controller.mode == Controller.Mode.HEAT
+        assert ctl_uid in service.controllers
+        controller = service.controllers[ctl_uid]  # type: Controller
 
-    # Now updated
-    await controller.change_system_state('SysMode', 'cool')
-    assert controller.mode == Controller.Mode.COOL
+        assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
+        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == TST_FIREPLACES[ctl_uid]["IPAddress"]
 
 
-async def test_ip_addr_change(service, caplog):
-    controller = service.controllers['000000001']  # type: Controller
-    assert controller.device_uid == '000000001'
-    assert controller.device_ip == '8.8.8.8'
+        for test_addr in '1.1.1.1', '2.2.2.2', '3.3.3.3':
 
-    service._process_datagram(
-        b'ASPort_12107,Mac_000000001,IP_8.8.8.4,Escea,iLight,iDrate',
-        ('8.8.8.4', 12107))
-    await sleep(0)
+            # TODO: How to patch response so the address is changed
+            service._datagram.process_received(FireplaceMessage.dummy_response(FireplaceMessage.ResponseID.I_AM_A_FIRE, uid = ctl_uid), test_addr)
+            await sleep(0)
 
-    assert controller.device_ip == '8.8.8.4'
+            assert controller.device_ip == test_addr
 
 
 async def test_reconnect(service, caplog):
     controller = service.controllers['000000001']  # type: Controller
     assert controller.device_uid == '000000001'
-    assert controller.mode == Controller.Mode.HEAT
+    assert controller.power_on == True
 
     controller.connected = False
-    with raises(ConnectionError):
-        await controller.set_mode(Controller.Mode.COOL)
 
     assert caplog.messages[0][:30] == \
-        "Connection to controller lost:"
+        "Connection to fireplace lost:"
     assert not controller.sent
 
     controller.connected = True
     service._process_datagram(
-        b'ASPort_12107,Mac_000000001,IP_8.8.8.8,Escea,iLight,iDrate',
-        ('8.8.8.8', 12107))
+        b'ASPort_12107,Mac_000000001,0000011234',
+        ('8.8.8.8', 3300))
 
     await sleep(0.1)
 
     # Reconnect OK
     assert caplog.messages[1][:23] == \
-        "Controller reconnected:"
-    await controller.set_mode(Controller.Mode.COOL)
-    assert controller.sent[0] == ('SystemMODE', 'cool')
-
+        "Fireplace reconnected:"
+    await controller.power_on == True
 
 async def test_reconnect_listener(service):
     controller = service.controllers['000000001']  # type: Controller

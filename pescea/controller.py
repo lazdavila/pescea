@@ -1,15 +1,13 @@
 """Escea Network Controller module"""
 
 import asyncio
-import json
 import logging
 from asyncio import Lock
 from enum import Enum
-from typing import Any, Dict, List, Union, Optional
-
-from async_timeout import timeout
+from typing import Dict, Union, Optional
 
 from .message import FireplaceMessage
+from .datagram import FireplaceDatagram
 
 _LOG = logging.getLogger("pescea.controller")
 
@@ -20,15 +18,17 @@ class Controller:
 
     class Fan(Enum):
         """All fan modes"""
-        AUTO = 'auto'
-        FAN_BOOST = 'fan boost'
-        FLAME_EFFECT = 'flame effect'
+        FLAME_EFFECT = 'FlameEffect'
+        AUTO = 'Auto'
+        FAN_BOOST = 'FanBoost'
 
     # DictValue = Union[str, int, float]
     # ControllerData = Dict[str, DictValue]
 
     class DictEntries(Enum):
         """Available controller attributes"""
+        IP_ADDRESS = "IPAddress"
+        DEVICE_UID = "DeviceUId"
         HAS_NEW_TIMERS = "HasNewTimers"
         FIRE_IS_ON = "FireIsOn"
         FAN_MODE = "FanMode"
@@ -42,7 +42,7 @@ class Controller:
     """Time to wait for results from server."""
 
     CONNECT_RETRY_TIMEOUT = 20
-    """Cool-down period for retrying to connect to the controller"""
+    """Cool-down period for retrying to connect to the fireplace"""
 
     # TODO: Figure out what needs to be done (show "Waiting"?)
     START_STOP_WAIT_TIME = 120
@@ -56,26 +56,20 @@ class Controller:
                  device_ip: str) -> None:
         """Create a controller interface.
 
-        Usually this is called from the discovery service. If neither
-        device UID or address are specified, will search network for
-        exactly one controller. If address is specified then the UID is
-        ignored.
+        Usually this is called from the discovery service.
 
         Args:
             device_uid: Controller UId as a string (Serial Number of unit)
             device_addr: Device network address. Usually specified as IP
                 address
 
-
         Raises:
-            ConnectionAbortedError: If address is not set and more than one Escea
+            ConnectionAbortedError: If address is not set and more than one Escea fireplace
                 instance is discovered on the network.
             ConnectionRefusedError: If no Escea fireplace is discovered, or no
                 device discovered at the given IP address, or the UID does not match
         """
-        self._ip = device_ip
         self._discovery = discovery
-        self._device_uid = device_uid
 
         """ System settings:
             on / off
@@ -84,11 +78,16 @@ class Controller:
             current temperature
         """
         self._system_settings = {}  # type: Controller.ControllerData
+        self._system_settings[self.DictEntries.IP_ADDRESS] = device_ip
+        self._system_settings[self.DictEntries.DEVICE_UID] = device_uid
+
 
         self._initialised = False
         self._fail_exception = None
 
         self._sending_lock = Lock()
+
+        self._datagram = FireplaceDatagram(self.discovery, device_ip)
 
     async def _initialize(self) -> None:
         """Initialize the controller, does not complete until the system is
@@ -108,7 +107,7 @@ class Controller:
                 return
 
             try:
-                await self._refresh()
+                await self._refresh_system()
                 _LOG.debug("Polling unit %s.", self._device_uid)
             except ConnectionError as ex:
                 _LOG.debug("Poll failed due to exception %s.", repr(ex))
@@ -116,12 +115,12 @@ class Controller:
     @property
     def device_ip(self) -> str:
         """IP Address of the unit"""
-        return self._ip
+        return self._system_settings[self.DictEntries.IP_ADDRESS]
 
     @property
     def device_uid(self) -> str:
         """UId of the unit (serial number)"""
-        return self._device_uid
+        return self._system_settings[self.DictEntries.DEVICE_UID]
 
     @property
     def discovery(self):
@@ -140,7 +139,7 @@ class Controller:
         await self._set_system_state(self.DictEntries.FIRE_IS_ON, value)
 
     @property
-    def fan(self) -> 'Fan':
+    def fan(self):
         """The current fan level."""
         return self.Fan(self._get_system_state(self.DictEntries.FAN_MODE))
 
@@ -173,69 +172,136 @@ class Controller:
         await self._set_system_state(self.DictEntries.DESIRED_TEMP, degrees)
 
     @property
-    def room_temp(self) -> Optional[float]:
+    def current_temp(self) -> Optional[float]:
         """The room air temperature"""
         return float(self._get_system_state(self.DictEntries.CURRENT_TEMP)) or None
 
     @property
-    def temp_min(self) -> float:
+    def min_temp(self) -> float:
         """The minimum valid target (desired) temperature"""
-        return float(Controller.TEMP_MIN)
+        return float(Controller.MIN_TEMP)
 
     @property
-    def temp_max(self) -> float:
+    def max_temp(self) -> float:
         """The maximum valid target (desired) temperature"""
-        return float(Controller.TEMP_MAX)
+        return float(Controller.MAX_TEMP)
 
     async def _refresh_system(self, notify: bool = True) -> None:
         """Refresh the system settings."""
-        values = await self.request_status()
-        self._system_settings = values
+        response = await self.request_status()
+        if response.response_id == FireplaceMessage.ResponseID.STATUS:
+            self._system_settings[self.DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
+            self._system_settings[self.DictEntries.FIRE_IS_ON] = response.fire_is_on
+            self._system_settings[self.DictEntries.DESIRED_TEMP] = response.desired_temp
+            self._system_settings[self.DictEntries.CURRENT_TEMP] = response.current_temp
+            if response.fan_boost_is_on:
+                self._system_settings[self.DictEntries.FAN_MODE] = Controller.Fan.FAN_BOOST
+            elif response.fire_effect_on:
+                self._system_settings[self.DictEntries.FAN_MODE] = Controller.Fan.FLAME_EFFECT
+            else:
+                self._system_settings[self.DictEntries.FAN_MODE] = Controller.Fan.AUTO
         if notify:
             self._discovery.controller_update(self)
 
-    async def request_status(self):
+    async def request_status(self) -> FireplaceMessage:
         try:
-            async with self._send_command_async(
-                    self, FireplaceMessage.CommandID.STATUS_PLEASE) as response:
-                return await response
+            async with self._datagram._send_command_async(
+                        FireplaceMessage.CommandID.STATUS_PLEASE) as responses:
+                await responses
+                response, _ = responses[0] # just expecting one
+                return response
         except (asyncio.TimeoutError) as ex:
             self._failed_connection(ex)
-            raise ConnectionError("Unable to connect to the controller") \
+            raise ConnectionError("Unable to connect to the fireplace") \
                 from ex
 
     def _refresh_address(self, address):
         """Called from discovery to update the address"""
-        self._ip = address
+        self._system_settings[self.DictEntries.IP_ADDRESS] = address
+        self._datagram.set_ip(address)
         # Signal to the retry connection loop to have another go.
         if self._fail_exception:
             self._discovery.create_task(self._retry_connection())
 
     def _get_system_state(self, state):
         self._ensure_connected()
-        return self._system_settings.get(state)
+        return self._system_settings[state]
 
-    async def _set_system_state(self, state, command, value):
+    async def _set_system_state(self, state, value):
         if self._system_settings[state] == value:
             return
 
-        async with self._sending_lock:
-            await self._send_command_async(command, value)
+        if state == self.DictEntries.FIRE_IS_ON:
+            if value:
+                command = FireplaceMessage.CommandID.POWER_ON
+            else:
+                command = FireplaceMessage.CommandID.POWER_OFF
 
-            # Need to refresh immediately after setting.
-            try:
-                await self._refresh_system()
-            except ConnectionError:
-                pass
+        elif state == self.DictEntries.DESIRED_TEMP:
+            command = FireplaceMessage.CommandID.NEW_SET_TEMP
+
+        else:
+            # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
+            # Any change will take one or two separate commands:
+            # PART 1 -
+            #
+            # To AUTO:
+            # 1. If currently FAN_BOOST, turn off FAN_BOOST
+            #    else (currently FLAME_EFFECT), turn off FLAME_EFFECT
+            if value == self.fan.AUTO:
+                if self._system_settings[state] == self.fan.FAN_BOOST:
+                    command = FireplaceMessage.CommandID.FAN_BOOST_OFF
+                else:
+                    command = FireplaceMessage.CommandID.FLAME_EFFECT_OFF
+
+            # To FAN_BOOST:
+            # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
+            # 2. Turn on FAN_BOOST
+            elif value == self.fan.FAN_BOOST:
+                if self._system_settings[state] == self.fan.FLAME_EFFECT:
+                    command = FireplaceMessage.CommandID.FLAME_EFFECT_OFF      
+
+            # To FLAME_EFFECT:
+            # 1. If currently FAN_BOOST, turn off FAN_BOOST
+            # 2. Turn on FLAME_EFFECT
+            else:
+                if self._system_settings[state] == self.fan.FAN_BOOST:
+                    command = FireplaceMessage.CommandID.FAN_BOOST_OFF 
+
+        async with self._sending_lock:
+            await self._datagram._send_command_async(command, value)
+
+        if (state == self.DictEntries.FAN_MODE) and (value == self.Fan.AUTO):
+            # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
+            # Any change will take one or two separate commands:
+            # PART 2 -
+            #
+            # To FAN_BOOST:
+            # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
+            # 2. Turn on FAN_BOOST
+            if value == self.fan.FAN_BOOST:
+                command = FireplaceMessage.CommandID.FAN_BOOST_ON      
+
+            # To FLAME_EFFECT:
+            # 1. If currently FAN_BOOST, turn off FAN_BOOST
+            # 2. Turn on FLAME_EFFECT
+            else:
+                command = FireplaceMessage.CommandID.FLAME_EFFECT_ON 
+
+            async with self._sending_lock:
+                await self._datagram._send_command_async(command, value)
+
+
+        # Need to refresh immediately after setting.
+        try:
+            await self._refresh_system()
+        except ConnectionError:
+            pass
 
     def _ensure_connected(self) -> None:
         if self._fail_exception:
-            raise ConnectionError("Unable to connect to the controller") \
+            raise ConnectionError("Unable to connect to the fireplace") \
                 from self._fail_exception
-
-    # TODO: What to do on failed connection - UDP does not guarantee delivery 
-    # so it is expected... should mark it as disconnected if we get X failures
-    # ... how to code that up?
 
     def _failed_connection(self, ex):
         if self._fail_exception:
@@ -246,78 +312,14 @@ class Controller:
             return
         self._discovery.controller_disconnected(self, ex)
 
-
+    """ The remaining methods are for test purposes only """
     
-    async def _send_command_async(self, command: FireplaceMessage.CommandID, data: Any) -> Dict:
-        """ Send command via UDP
-
-            Returns received data (for STATUS_PLEASE command)
-        """
-        loop = self.discovery.loop
-        on_complete = loop.create_future()
-        device_ip = self.device_ip
-
-        controller_data = {}
-
-        message = FireplaceMessage(command, data)
-
-        class _DatagramProtocol:
-            def __init__(self, message, on_complete):
-                self.message = message
-                self.on_complete = on_complete
-                self.transport = None
-
-            def connection_made(self, transport):
-                self.transport = transport
-                self.transport.sendto(self.message)
-
-            def datagram_received(self, data, addr):
-                response = FireplaceMessage(data)
-                if response != message.expected_response:
-                    _LOG.warning(
-                            "Message response id: %s does not match command id: %s",
-                            response.response_id, command)
-                if response.response_id == FireplaceMessage.ResponseID.STATUS:
-                    self.controller_data = { 
-                        Controller.DictEntries.HAS_NEW_TIMERS : response.has_new_timers,
-                        Controller.DictEntries.FIRE_IS_ON: response.fire_is_on,
-                        Controller.DictEntries.DESIRED_TEMP: response.desired_temp,
-                        Controller.DictEntries.CURRENT_TEMP: response.current_temp
-                    }
-                    if response.fan_boost_is_on:
-                        self.controller_data += {Controller.DictEntries.FAN_MODE, Controller.Fan.FAN_BOOST}
-                    elif response.fire_effect_on:
-                        self.controller_data += {Controller.DictEntries.FAN_MODE, Controller.Fan.FLAME_EFFECT}
-                    else:
-                        self.controller_data += {Controller.DictEntries.FAN_MODE, Controller.Fan.AUTO}
-                self.transport.close()
-
-            def error_received(self, exc):
-                _LOG.warning(
-                        "Error receiving for uid=%s failed with exception: %s",
-                        self.device_uid, exc.__repr__())
-
-            def connection_lost(self, exc):
-                self.on_complete.set_result(True)
-
-        try:
-            async with timeout(Controller.REQUEST_TIMEOUT) as cm:
-                transport, _ = await loop.create_datagram_endpoint(
-                    lambda: _DatagramProtocol(FireplaceMessage(message, data), on_complete),
-                    remote_addr=(device_ip, FireplaceMessage.CONTROLLER_PORT))
-
-                # wait for response to be recieved.
-                await on_complete
-
-            if cm.expired:
-                if transport:
-                    transport.close()
-                raise asyncio.TimeoutError()
-
-            on_complete.result()
-
-            return controller_data
-
-        except (OSError, asyncio.TimeoutError) as ex:
-            self._failed_connection(ex)
-            raise ConnectionError("Unable to send UDP to controller") from ex
+    def dump(self, indent: str = '') -> None:
+        tab = "    "
+        print(indent + "Controller:")
+        print(indent + tab + "Discovery: {0}".format(self._discovery))
+        print(indent + tab + "Settings: {0}".format(self._system_settings))
+        print(indent + tab + "Initialised: {0}".format(self._initialised))
+        if self._fail_exception is not None:
+            print(indent + tab + "Fail Exception: {0}".format(self._fail_exception))
+        self._datagram.dump( indent = indent + tab)

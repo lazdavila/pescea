@@ -1,28 +1,22 @@
 """Escea device discovery."""
 
 import asyncio
+
 from async_timeout import current_task, timeout
 import logging
 from abc import abstractmethod, ABC
-from asyncio import (AbstractEventLoop, Condition, DatagramProtocol,
-                     DatagramTransport, Future, Task, )
+from asyncio import (AbstractEventLoop, Condition, Future, Task, )
 from logging import Logger
 from typing import Dict, List, Set, Optional
 
-from aiohttp import ClientSession
-
-import netifaces
-
 from .controller import Controller
-
+from .datagram import FireplaceDatagram
 from .message import FireplaceMessage
 
-DISCOVERY_TIMEOUT = 5.0
-DISCOVERY_SLEEP = 20.0
-DISCOVERY_RESCAN = 5.0
+DISCOVERY_SLEEP = 60.0 # Interval between status refreshes
+DISCOVERY_RESCAN = 5.0 # Interval on a Controller losing comms
 
-DISCOVERY_PORT = FireplaceMessage.CONTROLLER_PORT
-UPDATE_PORT = 9005 # Not sure why this needs to be defined and can't be auto
+BROADCAST_IP_ADDR = '255.255.255.255'
 
 _LOG = logging.getLogger('pescea.discovery')  # type: Logger
 
@@ -39,7 +33,6 @@ class LogExceptions:
             _LOG.exception(
                 "Exception ignored when calling listener %s", self.func)
         return True
-
 
 class Listener:
     """Base class for listeners for Escea updates"""
@@ -102,7 +95,12 @@ class AbstractDiscoveryService(ABC):
 
     @abstractmethod
     async def close(self) -> None:
-        """Stop discovery and close all connections"""
+        """Stop discovery.
+
+        As these are all UDP comms, there are no open connections to close.
+        
+        Returns immediately, but closing off controllers may take time
+        """
 
     @property
     def is_closed(self) -> bool:
@@ -113,11 +111,10 @@ class AbstractDiscoveryService(ABC):
         """Dictionary of all the currently discovered controllers"""
 
 
-class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
+class DiscoveryService(AbstractDiscoveryService, Listener):
     """Discovery protocol class. Not for external use."""
 
-    def __init__(self, loop: AbstractEventLoop = None,
-                 session: ClientSession = None) -> None:
+    def __init__(self, loop: AbstractEventLoop = None, ip_addr: str = BROADCAST_IP_ADDR) -> None:
         """Start the discovery protocol using the supplied loop.
 
         raises:
@@ -131,23 +128,16 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
 
         _LOG.info("Starting discovery protocol")
         if not loop:
-            if session:
-                self.loop = session.loop
-            else:
-                self.loop = asyncio.get_event_loop()
+            self.loop = asyncio.get_event_loop()
         else:
             self.loop = loop
 
-        self.session = session
-        self._own_session = session is None
-
-        self._transport = None  # type: Optional[DatagramTransport]
+        self._broadcast_ip = ip_addr
+        self._datagram = FireplaceDatagram(self, ip_addr)
 
         self._scan_condition = Condition(loop=self.loop)  # type: Condition
 
         self._tasks = []  # type: List[Future]
-
-        self.search_for_fires = FireplaceMessage(FireplaceMessage.CommandID.SEARCH_FOR_FIRES).bytearray_of
 
     # Async context manager interface
     async def __aenter__(self) -> AbstractDiscoveryService:
@@ -226,42 +216,11 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
 
     # Non-context versions of starting.
     async def start_discovery(self) -> None:
-        if self._own_session:
-            self.session = ClientSession(loop=self.loop)
-        await self.loop.create_datagram_endpoint(
-            lambda: self,
-            local_addr=('0.0.0.0', UPDATE_PORT),
-            allow_broadcast=True)
-
-    def connection_made(self, transport: DatagramTransport) -> None:  # type: ignore  # noqa: E501
-        if self._close_task:
-            transport.close()
-            return
-        assert not self._transport, "Another connection made"
-
-        self._transport = transport
-        self.create_task(self._scan_loop())
-
-    def _get_broadcasts(self):
-        for ifAddr in map(netifaces.ifaddresses, netifaces.interfaces()):
-            inetAddrs = ifAddr.get(netifaces.AF_INET)
-            if not inetAddrs:
-                continue
-            for inetAddr in inetAddrs:
-                broadcast = inetAddr.get('broadcast')
-                if broadcast:
-                    yield broadcast
-
-    def _send_broadcasts(self):
-        for broadcast in self._get_broadcasts():
-            _LOG.debug("Sending discovery message to addr %s", broadcast)
-            self._transport.sendto(self.search_for_fires, (broadcast, DISCOVERY_PORT))
+        await self._send_broadcast()
 
     async def _scan_loop(self) -> None:
-        assert self._transport, "Should be impossible"
-
         while True:
-            self._send_broadcasts()
+            await self._send_broadcast()
 
             try:
                 async with timeout(
@@ -275,9 +234,20 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
             if self._close_task:
                 return
 
+    async def _send_broadcast(self):
+        _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
+        try:
+            async with self.datagram._send_command_async(
+                        FireplaceMessage.CommandID.SEARCH_FOR_FIRES) as responses:
+                await responses
+                for response, addr in responses.items():
+                    self._discovery_received(response, addr)
+        except (asyncio.TimeoutError) as ex:
+            self._failed_connection(ex)
+            raise ConnectionError("Unable to connect to the controller") \
+                from ex
+
     async def rescan(self) -> None:
-        if self.is_closed:
-            raise ConnectionError("Already closed")
         _LOG.debug("Manual rescan of controllers triggered.")
         await self._rescan()
 
@@ -287,36 +257,8 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
 
     # Closing the connection
     async def close(self) -> None:
-        """Close the transport"""
-        if self._close_task:
-            await self._close_task
-            return
         _LOG.info("Close called on discovery service.")
-        if 'current_task' in asyncio.__dict__.keys():
-            self._close_task = asyncio.current_task(loop=self.loop)
-        else:
-            self._close_task = Task.current_task(loop=self.loop)
-        if self._transport:
-            self._transport.close()
-
-        await self._rescan()
-
-        if self._own_session and self.session:
-            await self.session.close()
-
         await asyncio.wait(self._tasks)
-
-    def connection_lost(self, exc):
-        _LOG.debug("Connection Lost")
-        if not self._close_task:
-            _LOG.error("Connection Lost unexpectedly: %s", repr(exc))
-            self.loop.create_task(self.close())
-
-    @property
-    def is_closed(self) -> bool:
-        if self._transport:
-            return self._transport.is_closing()
-        return self._close_task is not None
 
     def error_received(self, exc):
         _LOG.warning(
@@ -337,24 +279,9 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
                 "Unable to complete %s due to connection error: %s",
                 coro, repr(ex))
 
-    def datagram_received(self, data, addr):
-        _LOG.debug("Datagram Received %s", data)
-        if self._close_task:
-            return
-        self._process_datagram(data, addr)
-
-    def _process_datagram(self, data, addr):
-        self._discovery_received(data, addr)
-
     def _discovery_received(self, data, addr):
         device_ip, _ = addr
-        try:
-            message = FireplaceMessage(data)
-        except ValueError as ex:
-            _LOG.warning("Invalid Message Received: %s", data.decode())
-            return
-
-        device_uid = message.serial_number
+        device_uid = data.serial_number
 
         if device_uid not in self._controllers:
             # Create new controller.
@@ -383,15 +310,29 @@ class DiscoveryService(AbstractDiscoveryService, DatagramProtocol, Listener):
         return Controller(
             self, device_uid=device_uid, device_ip=device_ip)
 
+    """ Following methods are for test purposes only """
+
+    def dump(self, indent: str = '') -> None:
+        tab = "    "
+        print(indent + "DiscoveryService:")
+        print(indent + tab + "Controllers: {0}".format(self._controllers))
+        print(indent + tab + "Disconnected: {0}".format(self._disconnected))
+        print(indent + tab + "Listeners: {0}".format(self._listeners))
+        if self._close_task is not None:
+            print(indent + tab + "Close Task: {0}".format(self._close_task))
+        print(indent + tab + "Broadcast IP: {0}".format(self._broadcast_ip))
+        self._datagram.dump( indent = indent + tab)
+        print(indent + tab + "Scan Condition: {0}".format(self._scan_condition))
+        print(indent + tab + "Tasks: {0}".format(self._tasks))
 
 def discovery(*listeners: Listener,
               loop: AbstractEventLoop = None,
-              session: ClientSession = None) -> AbstractDiscoveryService:
+              ip_addr : str = None) -> AbstractDiscoveryService:
     """Create discovery service. Returned object is an asynchronous
     context manager so can be used with 'async with' statement.
     Alternately call start_discovery or start_discovery_async to commence
     the discovery process."""
-    service = DiscoveryService(loop=loop, session=session)
+    service = DiscoveryService(loop=loop, ip_addr=ip_addr)
     for listener in listeners:
         service.add_listener(listener)
     return service
