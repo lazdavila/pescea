@@ -12,14 +12,14 @@ from pytest import raises
 
 from .resources import TST_FIREPLACES
 
-
+"""
 @patch.object(DiscoveryService, '_get_broadcast')
 async def test_broadcast(broadcast):
     broadcast.return_value = []
 
     async with discovery():
         assert broadcast.called
-
+"""
 
 @patch.object(DiscoveryService, '_send_broadcast')
 async def test_messages_sent(send_broadcast):
@@ -40,10 +40,10 @@ async def test_rescan(send):
     assert service.is_closed
 
 
-async def test_fail_on_connect(loop, caplog):
+async def test_fail_on_connect(event_loop, caplog):
     from .conftest import MockDiscoveryService
 
-    service = MockDiscoveryService(loop)
+    service = MockDiscoveryService(event_loop)
     service.connected = False
 
     async with service:

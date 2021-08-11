@@ -147,7 +147,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.close()
 
-    def _task_done_callback(self, task):
+    def _task_done_callback(self, task: Task):
         if task.exception():
             _LOG.exception("Uncaught exception", exc_info=task.exception())
         self._tasks.remove(task)
@@ -237,14 +237,12 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     async def _send_broadcast(self):
         _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
         try:
-            async with self.datagram._send_command_async(
-                        FireplaceMessage.CommandID.SEARCH_FOR_FIRES) as responses:
-                await responses
-                for response, addr in responses.items():
-                    self._discovery_received(response, addr)
+            responses = await self._datagram._send_command_async(
+                    FireplaceMessage.CommandID.SEARCH_FOR_FIRES)
+            for addr in responses:
+                self._discovery_received(responses[addr], addr)
         except (asyncio.TimeoutError) as ex:
-            self._failed_connection(ex)
-            raise ConnectionError("Unable to connect to the controller") \
+            raise ConnectionError("No controllers responded") \
                 from ex
 
     async def rescan(self) -> None:

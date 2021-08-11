@@ -5,11 +5,10 @@ from copy import deepcopy
 from asynctest.mock import Mock
 from aiohttp import ClientSession
 
-from pescea import Controller
+from pescea.controller import Controller
 from pescea.discovery import DiscoveryService
 
 from pytest import fixture
-
 
 class MockController(Controller):
 
@@ -44,7 +43,7 @@ class MockDiscoveryService(DiscoveryService):
 
     def __init__(self, loop: AbstractEventLoop = None,
                  session: ClientSession = None) -> None:
-        super().__init__(loop=loop, session=session)
+        super().__init__(loop=loop)
         self._send_broadcasts = Mock()  # type: ignore
         self.datagram_received = Mock()  # type: ignore
         self.connected = True
@@ -54,16 +53,16 @@ class MockDiscoveryService(DiscoveryService):
 
 
 @fixture
-def service(loop):
+def service(event_loop):
     """Fixture to provide a test instance of HASS."""
-    service = MockDiscoveryService(loop)
-    loop.run_until_complete(service.start_discovery())
+    service = MockDiscoveryService(event_loop)
+    event_loop.run_until_complete(service.start_discovery())
 
     service._process_datagram(
         b'ASPort_12107,Mac_000000001,IP_8.8.8.8,Escea,iLight,iDrate',
         ('8.8.8.8', 12107))
-    loop.run_until_complete(sleep(0.1))
+    event_loop.run_until_complete(sleep(0.1))
 
     yield service
 
-    loop.run_until_complete(service.close())
+    event_loop.run_until_complete(service.close())

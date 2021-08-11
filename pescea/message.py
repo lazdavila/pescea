@@ -35,32 +35,31 @@ class FireplaceMessage:
     DATA_OFFSET_PIN = 4          # Data Byte 5..6: (Unsigned Long, big Endian) PIN (not used)
 
     # Preconfigured start/end characters:
-    MESSAGE_START_BYTE = b'\x47'
-    MESSAGE_END_BYTE = b'\x46'
+    MESSAGE_START_BYTE = 0x47
+    MESSAGE_END_BYTE = 0x46
 
     # Valid command identifiers:
     class CommandID(Enum):
-        STATUS_PLEASE = b'\x31'
-        POWER_ON = b'\x39'
-        POWER_OFF = b'\x3a'
-        SEARCH_FOR_FIRES = b'\x50'
-        FAN_BOOST_ON = b'\x37'
-        FAN_BOOST_OFF = b'\x38'
-        FLAME_EFFECT_ON = b'\x56'
-        FLAME_EFFECT_OFF = b'\x55'
-        NEW_SET_TEMP = b'\x57'
+        STATUS_PLEASE = 0x31
+        POWER_ON = 0x39
+        POWER_OFF = 0x3a
+        SEARCH_FOR_FIRES = 0x50
+        FAN_BOOST_ON = 0x37
+        FAN_BOOST_OFF = 0x38
+        FLAME_EFFECT_ON = 0x56
+        FLAME_EFFECT_OFF = 0x55
+        NEW_SET_TEMP = 0x57
 
     class ResponseID(Enum):
-        STATUS = b'\x80'
-        POWER_ON_ACK = b'\x8d'
-        POWER_OFF_ACK = b'\x8f'
-        FAN_BOOST_ON_ACK = b'\x8a'
-        FAN_BOOST_OFF_ACK = b'\x8b'
-        FLAME_EFFECT_ON_ACK = b'\x61'
-        FLAME_EFFECT_OFF_ACK = b'\x60'
-        NEW_SET_TEMP_ACK = b'\x66'
-        I_AM_A_FIRE = b'\x99'
-
+        STATUS = 0x80
+        POWER_ON_ACK = 0x8d
+        POWER_OFF_ACK = 0x8f
+        FAN_BOOST_ON_ACK = 0x8a
+        FAN_BOOST_OFF_ACK = 0x8b
+        FLAME_EFFECT_ON_ACK = 0x61
+        FLAME_EFFECT_OFF_ACK = 0x60
+        NEW_SET_TEMP_ACK = 0x66
+        I_AM_A_FIRE = 0x99
 
     # Acceptable limits when commanding NEW_SET_TEMP:
     MIN_SET_TEMP = 4
@@ -81,89 +80,101 @@ class FireplaceMessage:
         self._bytearray = None
         self._crc_sum = None
 
-    def __init__(self, command: CommandID, set_temp: int = 20) -> None:
-        """ Create a command (outgoing) message.
-            The parameter *set_temp* only applies to command *NEW_SET_TEMP*
-            Use the property bytearray_of to get the bytes to send.
-        """
-        self._initialise_data(self)
-
-        self._is_command = True
-        self._id = command
-        self._desired_temp = set_temp # Only used for NEW_SET_TEMP
-
-        # Build outgoing message:
-
-        self._bytearray = bytearray(self.MESSAGE_LENGTH)
-
-        self._bytearray[self.MSG_OFFSET_START_BYTE] = self.MESSAGE_START_BYTE
-        self._bytearray[self.MSG_OFFSET_END_BYTE] = self.MESSAGE_END_BYTE
+    def __init__(self, command: CommandID = None, set_temp: int = None, incoming: bytearray = None) -> None:
+        """ Creates eitner a Command or a Response message
         
-        self._bytearray[self.MSG_OFFSET_ID] = self._id
-
-        if self._id == self.CommandID.NEW_SET_TEMP:
-            self._bytearray[self.MSG_OFFSET_DATA_LENGTH] = 1 # For the desired temperature (rest have no data)
-            self._bytearray[self.MSG_OFFSET_DATA_START] = self._desired_temp
-
-        # Calculate CRC
-        self._crc_sum = 0
-        for i in range(self.MSG_OFFSET_ID,self.MSG_OFFSET_DATA_END):
-            self._crc_sum += self._bytearray[i]
-        self._crc_sum = self._crc_sum % 255
-        self._bytearray[self.MSG_OFFSET_CRC] = self._crc_sum
-    
-    def __init__(self, incoming: bytearray) -> None:
-        """Create a response Message from incoming buffer
-        
-        Raises:
-            ValueError if message content does not match specification
+            Args: Either command or incoming must be set
         """
-        self._initialise_data(self)
 
-        self._bytearray = incoming
+        if command is not None:
+            """ Create a command (outgoing) message.
+                The parameter *set_temp* only applies to command *NEW_SET_TEMP*
+                Use the property bytearray_of to get the bytes to send.
+            """
+            self._initialise_data()
 
-        # Check message integrity
-        if incoming.count != self.MESSAGE_LENGTH:
-            raise ValueError('Message:'+bytearray+' Has incorrect message length: '+ incoming.count)
+            self._is_command = True
+            self._id = command
+            self._desired_temp = set_temp # Only used for NEW_SET_TEMP
 
-        if incoming[self.MSG_OFFSET_START_BYTE] != self.MESSAGE_START_BYTE:
-            raise ValueError('Message:'+bytearray+' Has Invalid message start byte: ' + incoming[self.MESSAGE_START_BYTE])
+            # Build outgoing message:
 
-        if incoming[self.MSG_OFFSET_END_BYTE] != self.MESSAGE_END_BYTE:
-            raise ValueError('Message:'+bytearray+' Has Invalid message end byte: '+ incoming[self.MSG_OFFSET_END_BYTE])     
+            self._bytearray = bytearray(self.MESSAGE_LENGTH)
 
-        # Check CRC
-        self._crc_sum = 0
-        for i in range(self.MSG_OFFSET_ID,self.MSG_OFFSET_DATA_END):
-            self._crc_sum += incoming[i]
+            self._bytearray[self.MSG_OFFSET_START_BYTE] = self.MESSAGE_START_BYTE
+            self._bytearray[self.MSG_OFFSET_END_BYTE] = self.MESSAGE_END_BYTE
+            
+            self._bytearray[self.MSG_OFFSET_ID] = (self._id).value
 
-        self._crc_sum = self._crc_sum % 255
-        if self._crc_sum != incoming[self.MSG_OFFSET_CRC]:
-            raise ValueError('Message:'+bytearray+' Has Invalid CRC:' + incoming[self.MSG_OFFSET_CRC] + ' Expecting:'+ self._crc_sum)    
+            if self._id == self.CommandID.NEW_SET_TEMP:
+                self._bytearray[self.MSG_OFFSET_DATA_LENGTH] = 1 # For the desired temperature (rest have no data)
+                if self._desired_temp is not None:
+                    self._bytearray[self.MSG_OFFSET_DATA_START] = self._desired_temp
+                else:
+                    raise(ValueError)
 
-        self._is_command = False
-        self._id = self.ResponseID(incoming[self.MSG_OFFSET_ID])
+            # Calculate CRC
+            self._crc_sum = 0
+            for i in range(self.MSG_OFFSET_ID,self.MSG_OFFSET_DATA_END):
+                self._crc_sum += self._bytearray[i]
+            self._crc_sum = self._crc_sum % 255
+            self._bytearray[self.MSG_OFFSET_CRC] = self._crc_sum
 
-        # Extract data
-        if (self._id) == self.ResponseID.STATUS:
-            if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
-                raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:'+ 6)   
-            self._has_new_timers = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_TIMERS])
-            self._fire_on = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_FIRE_ON])
-            self._fan_boost_on = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_BOOST_ON])
-            self._effect_on = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_EFFECT_ON])
-            self._desired_temp = int(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_DESIRED_TEMP])
-            self._current_temp = int(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_CURRENT_TEMP])
+        elif incoming is not None:
+            """Create a response Message from incoming buffer
+            
+            Raises:
+                ValueError if message content does not match specification
+            """
+            self._initialise_data(self)
 
-        elif (self._id) == self.ResponseID.I_AM_A_FIRE:
-            if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
-                raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:'+ 6)
-            self.serial = int.from_bytes(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL+3], byteorder='big', signed=False)
-            self._pin = int.from_bytes(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN+1], byteorder='big', signed=False)
+            self._bytearray = incoming
 
+            # Check message integrity
+            if incoming.count != self.MESSAGE_LENGTH:
+                raise ValueError('Message:'+bytearray+' Has incorrect message length: '+ incoming.count)
+
+            if incoming[self.MSG_OFFSET_START_BYTE] != self.MESSAGE_START_BYTE:
+                raise ValueError('Message:'+bytearray+' Has Invalid message start byte: ' + incoming[self.MESSAGE_START_BYTE])
+
+            if incoming[self.MSG_OFFSET_END_BYTE] != self.MESSAGE_END_BYTE:
+                raise ValueError('Message:'+bytearray+' Has Invalid message end byte: '+ incoming[self.MSG_OFFSET_END_BYTE])     
+
+            # Check CRC
+            self._crc_sum = 0
+            for i in range(self.MSG_OFFSET_ID,self.MSG_OFFSET_DATA_END):
+                self._crc_sum += incoming[i]
+
+            self._crc_sum = self._crc_sum % 255
+            if self._crc_sum != incoming[self.MSG_OFFSET_CRC]:
+                raise ValueError('Message:'+bytearray+' Has Invalid CRC:' + incoming[self.MSG_OFFSET_CRC] + ' Expecting:'+ self._crc_sum)    
+
+            self._is_command = False
+            self._id = self.ResponseID(incoming[self.MSG_OFFSET_ID])
+
+            # Extract data
+            if (self._id) == self.ResponseID.STATUS:
+                if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
+                    raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:'+ 6)   
+                self._has_new_timers = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_TIMERS])
+                self._fire_on = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_FIRE_ON])
+                self._fan_boost_on = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_BOOST_ON])
+                self._effect_on = bool(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_EFFECT_ON])
+                self._desired_temp = int(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_DESIRED_TEMP])
+                self._current_temp = int(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_CURRENT_TEMP])
+
+            elif (self._id) == self.ResponseID.I_AM_A_FIRE:
+                if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
+                    raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:'+ 6)
+                self.serial = int.from_bytes(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL+3], byteorder='big', signed=False)
+                self._pin = int.from_bytes(incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN+1], byteorder='big', signed=False)
+
+            else:
+                if int(incoming[self.MSG_OFFSET_DATA_LENGTH]) != 0:
+                    raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + int(incoming[self.MSG_OFFSET_DATA_LENGTH]) + ' Expecting:'+ 0)               
         else:
-            if int(incoming[self.MSG_OFFSET_DATA_LENGTH]) != 0:
-                 raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + int(incoming[self.MSG_OFFSET_DATA_LENGTH]) + ' Expecting:'+ 0)               
+            # Screwed up the constructor
+            raise(ValueError)
 
     @property
     def command_id(self) -> CommandID:
@@ -268,7 +279,7 @@ class FireplaceMessage:
         if force_id_error:
             message[FireplaceMessage.MSG_OFFSET_ID] = 0
         else:
-            message[FireplaceMessage.MSG_OFFSET_ID] = response_id
+            message[FireplaceMessage.MSG_OFFSET_ID] = response_id.value
 
         if response_id == FireplaceMessage.ResponseID.I_AM_A_FIRE:
             message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 6
@@ -322,7 +333,7 @@ class FireplaceMessage:
             print(indent + tab + tab + "Has new timers: {0}".format(self._has_new_timers))
 
         if self._fan_boost_on is not None:
-            print(indent + tab + tab + "Fan Boost on: {0}".format(self._fan_boost_is_on))
+            print(indent + tab + tab + "Fan Boost on: {0}".format(self._fan_boost_on))
             
         if self._effect_on is not None:
             print(indent + tab + tab + "Flame Effect on: {0}".format(self._effect_on))

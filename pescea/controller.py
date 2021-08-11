@@ -48,8 +48,8 @@ class Controller:
     START_STOP_WAIT_TIME = 120
     """Time to wait for fireplace to start up / shut down"""
 
-    MIN_TEMP = FireplaceMessage.MIN_TEMP
-    MAX_TEMP = FireplaceMessage.MAX_TEMP
+    MIN_TEMP = FireplaceMessage.MIN_SET_TEMP
+    MAX_TEMP = FireplaceMessage.MAX_SET_TEMP
     """Target temperature limits"""
 
     def __init__(self, discovery, device_uid: str,
@@ -108,7 +108,7 @@ class Controller:
 
             try:
                 await self._refresh_system()
-                _LOG.debug("Polling unit %s.", self._device_uid)
+                _LOG.debug("Polling unit %s.", self._system_settings[self.DictEntries.DEVICE_UID])
             except ConnectionError as ex:
                 _LOG.debug("Poll failed due to exception %s.", repr(ex))
 
@@ -208,7 +208,7 @@ class Controller:
             async with self._datagram._send_command_async(
                         FireplaceMessage.CommandID.STATUS_PLEASE) as responses:
                 await responses
-                response, _ = responses[0] # just expecting one
+                _, response = next(iter(responses)) # just expecting one
                 return response
         except (asyncio.TimeoutError) as ex:
             self._failed_connection(ex)

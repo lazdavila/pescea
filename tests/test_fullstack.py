@@ -1,7 +1,7 @@
 """Test for controller"""
 
 from asyncio import Event
-from pescea import Controller, Listener, Zone, discovery
+from pescea import Controller, Listener, discovery
 from pytest import raises, mark
 
 
@@ -12,7 +12,7 @@ def dump_data(ctrl: Controller):
         ctrl.temp_supply, ctrl.mode, ctrl.is_on))
     print("sleep_timer={0}".format(ctrl.sleep_timer))
 
-async def test_full_stack(loop):
+async def test_full_stack(event_loop):
     controllers = []
     event = Event()
 
