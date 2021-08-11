@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Tuple
 from copy import deepcopy
 
 from asynctest.mock import Mock
-from aiohttp import ClientSession
 
 from pescea.controller import Controller
 from pescea.discovery import DiscoveryService
@@ -41,8 +40,7 @@ class MockController(Controller):
 
 class MockDiscoveryService(DiscoveryService):
 
-    def __init__(self, loop: AbstractEventLoop = None,
-                 session: ClientSession = None) -> None:
+    def __init__(self, loop: AbstractEventLoop = None) -> None:
         super().__init__(loop=loop)
         self._send_broadcasts = Mock()  # type: ignore
         self.datagram_received = Mock()  # type: ignore

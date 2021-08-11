@@ -5,13 +5,6 @@ from pescea import Controller, Listener, discovery
 from pytest import raises, mark
 
 
-def dump_data(ctrl: Controller):
-    """Testing"""
-    print("ip addr={0} uid={1}".format(ctrl.device_ip,ctrl.device_uid))
-    print("supply={0} mode={1} isOn={2}".format(
-        ctrl.temp_supply, ctrl.mode, ctrl.is_on))
-    print("sleep_timer={0}".format(ctrl.sleep_timer))
-
 async def test_full_stack(event_loop):
     controllers = []
     event = Event()
@@ -31,7 +24,7 @@ async def test_full_stack(event_loop):
 
         ctrl = controllers[0]
 
-        dump_data(ctrl)
+        ctrl.dump()
 
         # test setting values
         await ctrl.set_mode(Controller.Mode.AUTO)
@@ -48,4 +41,4 @@ async def test_full_stack(event_loop):
 
         await ctrl.set_mode(Controller.Mode.HEAT)
 
-        dump_data(ctrl)
+        ctrl.dump()
