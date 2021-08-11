@@ -13,15 +13,17 @@ from .controller import Controller
 from .datagram import FireplaceDatagram
 from .message import FireplaceMessage
 
-DISCOVERY_SLEEP = 60.0 # Interval between status refreshes
-DISCOVERY_RESCAN = 5.0 # Interval on a Controller losing comms
+DISCOVERY_SLEEP = 60.0  # Interval between status refreshes
+DISCOVERY_RESCAN = 5.0  # Interval on a Controller losing comms
 
 BROADCAST_IP_ADDR = '255.255.255.255'
 
 _LOG = logging.getLogger('pescea.discovery')  # type: Logger
 
+
 class LogExceptions:
     """Utility context manager to log and discard exceptions"""
+
     def __init__(self, func: str) -> None:
         self.func = func
 
@@ -33,6 +35,7 @@ class LogExceptions:
             _LOG.exception(
                 "Exception ignored when calling listener %s", self.func)
         return True
+
 
 class Listener:
     """Base class for listeners for Escea updates"""
@@ -57,6 +60,7 @@ class Listener:
         """Called when a system update message is received from the controller.
         Controller data will be set to new value.
         """
+
 
 class AbstractDiscoveryService(ABC):
     """Interface for discovery.
@@ -98,7 +102,7 @@ class AbstractDiscoveryService(ABC):
         """Stop discovery.
 
         As these are all UDP comms, there are no open connections to close.
-        
+
         Returns immediately, but closing off controllers may take time
         """
 
@@ -238,7 +242,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
         try:
             responses = await self._datagram._send_command_async(
-                    FireplaceMessage.CommandID.SEARCH_FOR_FIRES)
+                FireplaceMessage.CommandID.SEARCH_FOR_FIRES)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
         except (asyncio.TimeoutError) as ex:
@@ -289,7 +293,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
             async def initialize_controller():
                 try:
-                    await controller._initialize() 
+                    await controller._initialize()
                 except ConnectionError as ex:
                     _LOG.warning(
                         "Can't connect to discovered server at IP '%s'"
@@ -319,13 +323,15 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         if self._close_task is not None:
             print(indent + tab + "Close Task: {0}".format(self._close_task))
         print(indent + tab + "Broadcast IP: {0}".format(self._broadcast_ip))
-        self._datagram.dump( indent = indent + tab)
-        print(indent + tab + "Scan Condition: {0}".format(self._scan_condition))
+        self._datagram.dump(indent=indent + tab)
+        print(indent + tab +
+              "Scan Condition: {0}".format(self._scan_condition))
         print(indent + tab + "Tasks: {0}".format(self._tasks))
+
 
 def discovery(*listeners: Listener,
               loop: AbstractEventLoop = None,
-              ip_addr : str = None) -> AbstractDiscoveryService:
+              ip_addr: str = None) -> AbstractDiscoveryService:
     """Create discovery service. Returned object is an asynchronous
     context manager so can be used with 'async with' statement.
     Alternately call start_discovery or start_discovery_async to commence

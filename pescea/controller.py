@@ -11,7 +11,9 @@ from .datagram import FireplaceDatagram
 
 _LOG = logging.getLogger("pescea.controller")
 
-REFRESH_INTERVAL = 30.0 # Seconds between updates - nothing changes quickly with fireplaces
+# Seconds between updates - nothing changes quickly with fireplaces
+REFRESH_INTERVAL = 30.0
+
 
 class Controller:
     """Interface to Escea controller"""
@@ -81,7 +83,6 @@ class Controller:
         self._system_settings[self.DictEntries.IP_ADDRESS] = device_ip
         self._system_settings[self.DictEntries.DEVICE_UID] = device_uid
 
-
         self._initialised = False
         self._fail_exception = None
 
@@ -108,7 +109,8 @@ class Controller:
 
             try:
                 await self._refresh_system()
-                _LOG.debug("Polling unit %s.", self._system_settings[self.DictEntries.DEVICE_UID])
+                _LOG.debug("Polling unit %s.",
+                           self._system_settings[self.DictEntries.DEVICE_UID])
             except ConnectionError as ex:
                 _LOG.debug("Poll failed due to exception %s.", repr(ex))
 
@@ -206,9 +208,9 @@ class Controller:
     async def request_status(self) -> FireplaceMessage:
         try:
             async with self._datagram._send_command_async(
-                        FireplaceMessage.CommandID.STATUS_PLEASE) as responses:
+                    FireplaceMessage.CommandID.STATUS_PLEASE) as responses:
                 await responses
-                _, response = next(iter(responses)) # just expecting one
+                _, response = next(iter(responses))  # just expecting one
                 return response
         except (asyncio.TimeoutError) as ex:
             self._failed_connection(ex)
@@ -259,14 +261,14 @@ class Controller:
             # 2. Turn on FAN_BOOST
             elif value == self.fan.FAN_BOOST:
                 if self._system_settings[state] == self.fan.FLAME_EFFECT:
-                    command = FireplaceMessage.CommandID.FLAME_EFFECT_OFF      
+                    command = FireplaceMessage.CommandID.FLAME_EFFECT_OFF
 
             # To FLAME_EFFECT:
             # 1. If currently FAN_BOOST, turn off FAN_BOOST
             # 2. Turn on FLAME_EFFECT
             else:
                 if self._system_settings[state] == self.fan.FAN_BOOST:
-                    command = FireplaceMessage.CommandID.FAN_BOOST_OFF 
+                    command = FireplaceMessage.CommandID.FAN_BOOST_OFF
 
         async with self._sending_lock:
             await self._datagram._send_command_async(command, value)
@@ -280,17 +282,16 @@ class Controller:
             # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
             # 2. Turn on FAN_BOOST
             if value == self.fan.FAN_BOOST:
-                command = FireplaceMessage.CommandID.FAN_BOOST_ON      
+                command = FireplaceMessage.CommandID.FAN_BOOST_ON
 
             # To FLAME_EFFECT:
             # 1. If currently FAN_BOOST, turn off FAN_BOOST
             # 2. Turn on FLAME_EFFECT
             else:
-                command = FireplaceMessage.CommandID.FLAME_EFFECT_ON 
+                command = FireplaceMessage.CommandID.FLAME_EFFECT_ON
 
             async with self._sending_lock:
                 await self._datagram._send_command_async(command, value)
-
 
         # Need to refresh immediately after setting.
         try:
@@ -313,7 +314,7 @@ class Controller:
         self._discovery.controller_disconnected(self, ex)
 
     """ The remaining methods are for test purposes only """
-    
+
     def dump(self, indent: str = '') -> None:
         tab = "    "
         print(indent + "Controller:")
@@ -321,5 +322,6 @@ class Controller:
         print(indent + tab + "Settings: {0}".format(self._system_settings))
         print(indent + tab + "Initialised: {0}".format(self._initialised))
         if self._fail_exception is not None:
-            print(indent + tab + "Fail Exception: {0}".format(self._fail_exception))
-        self._datagram.dump( indent = indent + tab)
+            print(indent + tab +
+                  "Fail Exception: {0}".format(self._fail_exception))
+        self._datagram.dump(indent=indent + tab)

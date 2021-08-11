@@ -22,7 +22,7 @@ async def test_full_stack(event_loop):
         await event.wait()
         event.clear()
 
-        ctrl = controllers[0]
+        ctrl = controllers[0]  # type Controller()
 
         ctrl.dump()
 

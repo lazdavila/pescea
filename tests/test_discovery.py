@@ -21,6 +21,7 @@ async def test_broadcast(broadcast):
         assert broadcast.called
 """
 
+
 @patch.object(DiscoveryService, '_send_broadcast')
 async def test_messages_sent(send_broadcast):
     async with discovery():
@@ -76,7 +77,7 @@ async def test_discovery(service: DiscoveryService):
 
         assert ctl_uid in service.controllers
         controller = service.controllers[ctl_uid]  # type: Controller
-        
+
         # Check system settings are update on init
         assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
         assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == TST_FIREPLACES[ctl_uid]["IPAddress"]
@@ -95,7 +96,7 @@ async def test_discovery(service: DiscoveryService):
         assert controller.current_temp == TST_FIREPLACES[ctl_uid]["CurrentTemp"]
         assert controller.min_temp == FireplaceMessage.MIN_SET_TEMP
         assert controller.max_temp == FireplaceMessage.MAX_SET_TEMP
-        
+
         # check the methods
 
         await controller.set_on(not controller.is_on)
@@ -105,7 +106,7 @@ async def test_discovery(service: DiscoveryService):
             await controller.set_fan(fan_mode)
             assert controller.fan == fan_mode
 
-        for desired_temp in range(int(controller.min_temp),int(controller.max_temp)):
+        for desired_temp in range(int(controller.min_temp), int(controller.max_temp)):
             await controller.set_desired_temp(float(desired_temp))
             assert int(controller.desired_temp) == desired_temp
 
@@ -124,7 +125,7 @@ async def test_discovery(service: DiscoveryService):
         assert controller.desired_temp == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
 
         await controller._refresh_address(TST_FIREPLACES[ctl_uid]["IPAddress"])
-        assert controller.device_ip == TST_FIREPLACES[ctl_uid]["IPAddress"]   
+        assert controller.device_ip == TST_FIREPLACES[ctl_uid]["IPAddress"]
 
 
 async def test_ip_addr_change(service: DiscoveryService, caplog):
@@ -138,11 +139,11 @@ async def test_ip_addr_change(service: DiscoveryService, caplog):
         assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
         assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == TST_FIREPLACES[ctl_uid]["IPAddress"]
 
-
         for test_addr in '1.1.1.1', '2.2.2.2', '3.3.3.3':
 
             # TODO: How to patch response so the address is changed
-            service._datagram.process_received(FireplaceMessage.dummy_response(FireplaceMessage.ResponseID.I_AM_A_FIRE, uid = ctl_uid), test_addr)
+            service._datagram.process_received(FireplaceMessage.dummy_response(
+                FireplaceMessage.ResponseID.I_AM_A_FIRE, uid=ctl_uid), test_addr)
             await sleep(0)
 
             assert controller.device_ip == test_addr
@@ -170,6 +171,7 @@ async def test_reconnect(service, caplog):
     assert caplog.messages[1][:23] == \
         "Fireplace reconnected:"
     await controller.power_on == True
+
 
 async def test_reconnect_listener(service):
     controller = service.controllers['000000001']  # type: Controller

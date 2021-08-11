@@ -9,6 +9,7 @@ from pescea.discovery import DiscoveryService
 
 from pytest import fixture
 
+
 class MockController(Controller):
 
     def __init__(self, discovery, device_uid: str, device_ip: str, is_v2) -> None:
@@ -35,8 +36,9 @@ class MockController(Controller):
     async def change_system_state(self, state: str, value: Any) -> None:
         self.resources['SystemSettings'][state] = value
         self.discovery._process_datagram(
-           b'changedsystem', ('8.8.8.8', 12107))
+            b'changedsystem', ('8.8.8.8', 12107))
         await sleep(0)
+
 
 class MockDiscoveryService(DiscoveryService):
 

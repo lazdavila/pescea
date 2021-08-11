@@ -18,7 +18,7 @@ _LOG = logging.getLogger("pescea.datagram")
 class FireplaceDatagram:
 
     # Port to use for discovery and integration
-    CONTROLLER_PORT = 3300    
+    CONTROLLER_PORT = 3300
 
     REQUEST_TIMEOUT = 5
     """Time to wait for results from server."""
@@ -62,7 +62,7 @@ class FireplaceDatagram:
         on_complete = loop.create_future()
         device_ip = self._ip
 
-        message = FireplaceMessage(command = command, set_temp = data)
+        message = FireplaceMessage(command=command, set_temp=data)
 
         responses = dict()   # type: self.MultipleResponses
 
@@ -77,19 +77,19 @@ class FireplaceDatagram:
                 self.transport.sendto(self.message)
 
             def datagram_received(self, data, addr):
-                response = FireplaceMessage(incoming = data)
+                response = FireplaceMessage(incoming=data)
                 if response != self.message.expected_response:
                     _LOG.error(
-                            "Message response id: %s does not match command id: %s",
-                            response.response_id, command)
+                        "Message response id: %s does not match command id: %s",
+                        response.response_id, command)
                 responses[addr] = response
                 if command != FireplaceMessage.CommandID.SEARCH_FOR_FIRES:
                     self.transport.close()
 
             def error_received(self, exc):
                 _LOG.warning(
-                        "Error receiving for uid=%s failed with exception: %s",
-                        self.device_uid, exc.__repr__())
+                    "Error receiving for uid=%s failed with exception: %s",
+                    self.device_uid, exc.__repr__())
 
             def connection_lost(self, exc):
                 self.on_complete.set_result(True)
@@ -97,7 +97,8 @@ class FireplaceDatagram:
         try:
             async with timeout(self.REQUEST_TIMEOUT) as cm:
                 transport, _ = await loop.create_datagram_endpoint(
-                    lambda: _DatagramProtocol(message.bytearray_of, on_complete),
+                    lambda: _DatagramProtocol(
+                        message.bytearray_of, on_complete),
                     remote_addr=(device_ip, self.CONTROLLER_PORT),
                     allow_broadcast=True)
 
@@ -116,7 +117,6 @@ class FireplaceDatagram:
         except (OSError, asyncio.TimeoutError) as ex:
             raise ConnectionError("Unable to send UDP") from ex
 
-
     """ The rest of this module is to support testing """
 
     def dump(self, indent: str = '') -> None:
@@ -125,5 +125,6 @@ class FireplaceDatagram:
         print(indent + tab + "Device IP: {0}".format(self._ip))
         print(indent + tab + "Discovery: {0}".format(self._discovery))
         if self._fail_exception is not None:
-            print(indent + tab + "Fail Exception: {0}".format(self._fail_exception))
+            print(indent + tab +
+                  "Fail Exception: {0}".format(self._fail_exception))
         print(indent + tab + "Sending Lock: {0}".format(self._sending_lock))
