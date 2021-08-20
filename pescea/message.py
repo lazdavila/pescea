@@ -116,6 +116,8 @@ class FireplaceMessage:
 
             if self._id == self.CommandID.NEW_SET_TEMP:
                 # For the desired temperature (rest have no data)
+                if self._desired_temp < self.MIN_SET_TEMP or self._desired_temp> self.MAX_SET_TEMP:
+                    raise ValueError
                 self._bytearray[self.MSG_OFFSET_DATA_LENGTH] = 1
                 if self._desired_temp is not None:
                     self._bytearray[self.MSG_OFFSET_DATA_START] = self._desired_temp
@@ -135,22 +137,22 @@ class FireplaceMessage:
             Raises:
                 ValueError if message content does not match specification
             """
-            self._initialise_data(self)
+            self._initialise_data()
 
             self._bytearray = incoming
 
             # Check message integrity
-            if incoming.count != self.MESSAGE_LENGTH:
+            if len(incoming) != self.MESSAGE_LENGTH:
                 raise ValueError(
-                    'Message:'+bytearray+' Has incorrect message length: ' + incoming.count)
+                    'Message:' + self._bytearray.hex() + ' Has incorrect message length: {0}'.format(len(incoming)))
 
             if incoming[self.MSG_OFFSET_START_BYTE] != self.MESSAGE_START_BYTE:
                 raise ValueError(
-                    'Message:'+bytearray+' Has Invalid message start byte: ' + incoming[self.MESSAGE_START_BYTE])
+                    'Message:'+self._bytearray.hex()+' Has Invalid message start byte: {0}'.format(self.MESSAGE_START_BYTE))
 
             if incoming[self.MSG_OFFSET_END_BYTE] != self.MESSAGE_END_BYTE:
                 raise ValueError(
-                    'Message:'+bytearray+' Has Invalid message end byte: ' + incoming[self.MSG_OFFSET_END_BYTE])
+                    'Message:'+self._bytearray.hex()+' Has Invalid message end byte: {0}'.format(self.MSG_OFFSET_END_BYTE))
 
             # Check CRC
             self._crc_sum = 0
@@ -159,8 +161,9 @@ class FireplaceMessage:
 
             self._crc_sum = self._crc_sum % 255
             if self._crc_sum != incoming[self.MSG_OFFSET_CRC]:
-                raise ValueError('Message:'+bytearray+' Has Invalid CRC:' +
-                                 incoming[self.MSG_OFFSET_CRC] + ' Expecting:' + self._crc_sum)
+                raise ValueError('Message:'+self._bytearray.hex()
+                    +' Has Invalid CRC: {0}'.format(incoming[self.MSG_OFFSET_CRC]) 
+                    +' Expecting: {0}'.format(self._crc_sum))
 
             self._is_command = False
             self._id = self.ResponseID(incoming[self.MSG_OFFSET_ID])
@@ -168,8 +171,9 @@ class FireplaceMessage:
             # Extract data
             if (self._id) == self.ResponseID.STATUS:
                 if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
-                    raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' +
-                                     incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
+                    raise ValueError('Message:'+self._bytearray.hex()
+                        +' Has Invalid Data Length: {0}'.format(incoming[self.MSG_OFFSET_DATA_LENGTH])
+                        +' Expecting: 6')
                 self._has_new_timers = bool(
                     incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_TIMERS])
                 self._fire_on = bool(
@@ -185,7 +189,7 @@ class FireplaceMessage:
 
             elif (self._id) == self.ResponseID.I_AM_A_FIRE:
                 if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
-                    raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' +
+                    raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' +
                                      incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
                 self.serial = int.from_bytes(
                     incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL+3], byteorder='big', signed=False)
@@ -194,7 +198,7 @@ class FireplaceMessage:
 
             else:
                 if int(incoming[self.MSG_OFFSET_DATA_LENGTH]) != 0:
-                    raise ValueError('Message:'+bytearray+' Has Invalid Data Length:' + int(
+                    raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' + int(
                         incoming[self.MSG_OFFSET_DATA_LENGTH]) + ' Expecting:' + 0)
         else:
             # Screwed up the constructor
@@ -306,7 +310,7 @@ class FireplaceMessage:
         else:
             message[FireplaceMessage.MSG_OFFSET_ID] = response_id.value
 
-        if response_id == FireplaceMessage.ResponseID.I_AM_A_FIRE:
+        if response_id == FireplaceMessage.ResponseID.STATUS:
             message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 6
             message[FireplaceMessage.MSG_OFFSET_DATA_START] = desired_temp
             message[FireplaceMessage.MSG_OFFSET_DATA_START +
@@ -325,13 +329,11 @@ class FireplaceMessage:
         elif response_id == FireplaceMessage.ResponseID.I_AM_A_FIRE:
             message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 6
             serial_segment = uid.to_bytes(
-                length=4, byteroder='big', signed=False)
+                length=4, byteorder='big', signed=False)
             pin_segment = int(1234).to_bytes(
-                length=2, byteroder='big', signed=False)
-            message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_SERIAL:
-                    FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_SERIAL+3] = serial_segment
-            message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_PIN:
-                    FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_PIN+1] = pin_segment
+                length=2, byteorder='big', signed=False)
+            message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_SERIAL: 4] = serial_segment
+            message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_PIN: 2] = pin_segment
 
         else:
             message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 0
@@ -347,7 +349,7 @@ class FireplaceMessage:
             for i in range(FireplaceMessage.MSG_OFFSET_ID, FireplaceMessage.MSG_OFFSET_DATA_END):
                 crc_sum += message[i]
             crc_sum = crc_sum % 255
-            message[FireplaceMessage.MSG_OFFSET_CRC] = FireplaceMessage._crc_sum
+            message[FireplaceMessage.MSG_OFFSET_CRC] = crc_sum
 
         return message
 
@@ -355,15 +357,15 @@ class FireplaceMessage:
         tab = "    "
         print(indent + "FireplaceMessage:")
         print(indent + tab +
-              "Byte array: {0}".format(self.bytearray_of.decode))
+              "Byte array: " + self.bytearray_of.hex())
         print(indent + tab + "Structure:")
         if self._is_command is not None:
             if self._is_command:
                 print(indent + tab + tab +
-                      "Command ID: {0}".format(FireplaceMessage.CommandID(self._id)))
+                      "Command ID: " + FireplaceMessage.CommandID(self._id).name())
             else:
                 print(indent + tab + tab +
-                      "Response ID: {0}".format(FireplaceMessage.ResponseID(self._id)))
+                      "Response ID: " + FireplaceMessage.ResponseID(self._id).name())
 
         if self._has_new_timers is not None:
             print(indent + tab + tab +
