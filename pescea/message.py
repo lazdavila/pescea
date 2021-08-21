@@ -191,10 +191,10 @@ class FireplaceMessage:
                 if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
                     raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' +
                                      incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
-                self.serial = int.from_bytes(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL+3], byteorder='big', signed=False)
+                self._serial = int.from_bytes(
+                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL+4], byteorder='big', signed=False)
                 self._pin = int.from_bytes(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN+1], byteorder='big', signed=False)
+                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN+2], byteorder='big', signed=False)
 
             else:
                 if int(incoming[self.MSG_OFFSET_DATA_LENGTH]) != 0:
@@ -330,10 +330,12 @@ class FireplaceMessage:
             message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 6
             serial_segment = uid.to_bytes(
                 length=4, byteorder='big', signed=False)
-            pin_segment = int(1234).to_bytes(
+            pin_segment = int(9999).to_bytes(
                 length=2, byteorder='big', signed=False)
-            message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_SERIAL: 4] = serial_segment
-            message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_PIN: 2] = pin_segment
+            for i in range(len(serial_segment)):
+                message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_SERIAL+i] = serial_segment[i]
+            for i in range(len(pin_segment)):       
+                message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_PIN+i] = pin_segment[i]
 
         else:
             message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 0
