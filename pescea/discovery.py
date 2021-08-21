@@ -1,17 +1,18 @@
-"""Escea device discovery."""
+"""Escea fireplace device discovery."""
 
 import asyncio
-
-from async_timeout import current_task, timeout
 import logging
+
 from abc import abstractmethod, ABC
 from asyncio import (AbstractEventLoop, Condition, Future, Task, )
+from async_timeout import timeout
 from logging import Logger
 from typing import Dict, List, Set, Optional
 
+# Pescea imports:
 from .controller import Controller
 from .datagram import FireplaceDatagram
-from .message import FireplaceMessage
+from .message import FireplaceMessage, CommandID
 
 DISCOVERY_SLEEP = 60.0  # Interval between status refreshes
 DISCOVERY_RESCAN = 5.0  # Interval on a Controller losing comms
@@ -19,7 +20,6 @@ DISCOVERY_RESCAN = 5.0  # Interval on a Controller losing comms
 BROADCAST_IP_ADDR = '255.255.255.255'
 
 _LOG = logging.getLogger('pescea.discovery')  # type: Logger
-
 
 class LogExceptions:
     """Utility context manager to log and discard exceptions"""
@@ -137,7 +137,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
             self.loop = loop
 
         self._broadcast_ip = ip_addr
-        self._datagram = FireplaceDatagram(self, ip_addr)
+        self._datagram = FireplaceDatagram(self.loop, ip_addr)
 
         self._scan_condition = Condition(loop=self.loop)  # type: Condition
 
@@ -241,8 +241,8 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     async def _send_broadcast(self):
         _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
         try:
-            responses = await self._datagram._send_command_async(
-                FireplaceMessage.CommandID.SEARCH_FOR_FIRES)
+            responses = await self._datagram.send_command(
+                CommandID.SEARCH_FOR_FIRES)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
         except (asyncio.TimeoutError) as ex:
@@ -281,7 +281,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                 "Unable to complete %s due to connection error: %s",
                 coro, repr(ex))
 
-    def _discovery_received(self, data, addr):
+    def _discovery_received(self, data: FireplaceMessage, addr):
         device_ip, _ = addr
         device_uid = data.serial_number
 
@@ -293,7 +293,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
             async def initialize_controller():
                 try:
-                    await controller._initialize()
+                    await controller.initialize()
                 except ConnectionError as ex:
                     _LOG.warning(
                         "Can't connect to discovered server at IP '%s'"
@@ -306,7 +306,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
             self.create_task(initialize_controller())
         else:
             controller = self._controllers[device_uid]
-            controller._refresh_address(device_ip)
+            controller.refresh_address(device_ip)
 
     def _create_controller(self, device_uid, device_ip):
         return Controller(

@@ -4,28 +4,31 @@
 """
 
 import asyncio
-from asyncio import Lock
+
+from asyncio import  Future, DatagramTransport
+from asyncio.events import AbstractEventLoop
 
 from async_timeout import timeout
-from typing import Any, List, Dict
+from typing import Any, Dict
 
-from .message import FireplaceMessage
+# Pescea imports:
+from .message import FireplaceMessage, CommandID
 
 import logging
 _LOG = logging.getLogger("pescea.datagram")
 
+# Port to use for discovery and integration
+CONTROLLER_PORT = 3300
+
+# Time to wait for results from server
+REQUEST_TIMEOUT = 5
 
 class FireplaceDatagram:
-
-    # Port to use for discovery and integration
-    CONTROLLER_PORT = 3300
-
-    REQUEST_TIMEOUT = 5
-    """Time to wait for results from server."""
+    """ Send UDP Datagrams to fireplace and receive responses """
 
     MultipleResponses = Dict[str, FireplaceMessage]
 
-    def __init__(self, discovery, device_ip: str) -> None:
+    def __init__(self, event_loop: AbstractEventLoop, device_ip: str) -> None:
         """Create a simple datagram client interface.
 
         Args:
@@ -37,11 +40,11 @@ class FireplaceDatagram:
                 device discovered at the given IP address, or the UID does not match
         """
         self._ip = device_ip
-        self._discovery = discovery
+        self._event_loop = event_loop
 
         self._fail_exception = None
 
-        self._sending_lock = Lock()
+        self._sending_lock = asyncio.Lock()
 
     @property
     def ip(self) -> str:
@@ -53,12 +56,12 @@ class FireplaceDatagram:
         """
         self._ip = ip_addr
 
-    async def _send_command_async(self, command: FireplaceMessage.CommandID, data: Any = None) -> MultipleResponses:
+    async def send_command(self, command: CommandID, data: Any = None) -> MultipleResponses:
         """ Send command via UDP
 
             Returns received responses and IP addresses they come from
         """
-        loop = self._discovery.loop
+        loop = self._event_loop
         on_complete = loop.create_future()
         device_ip = self._ip
 
@@ -67,39 +70,38 @@ class FireplaceDatagram:
         responses = dict()   # type: self.MultipleResponses
 
         class _DatagramProtocol:
-            def __init__(self, message, on_complete):
-                self.message = message
-                self.on_complete = on_complete
-                self.transport = None
+            def __init__(self, message : FireplaceMessage, on_complete: Future):
+                self._message = message
+                self._on_complete = on_complete
+                self._transport = None
 
-            def connection_made(self, transport):
-                self.transport = transport
-                self.transport.sendto(self.message)
+            def connection_made(self, transport: DatagramTransport):
+                self._transport = transport
+                self._transport.sendto(self._message.bytearray_)
 
             def datagram_received(self, data, addr):
                 response = FireplaceMessage(incoming=data)
-                if response != self.message.expected_response:
+                if response != self._message.expected_response:
                     _LOG.error(
                         "Message response id: %s does not match command id: %s",
-                        response.response_id, command)
+                        response.response_id, self._message.command_id)
                 responses[addr] = response
-                if command != FireplaceMessage.CommandID.SEARCH_FOR_FIRES:
-                    self.transport.close()
+                if command != CommandID.SEARCH_FOR_FIRES:
+                    self._transport.close()
 
             def error_received(self, exc):
                 _LOG.warning(
                     "Error receiving for uid=%s failed with exception: %s",
-                    self.device_uid, exc.__repr__())
+                    self._message.serial_number, exc.__repr__())
 
             def connection_lost(self, exc):
-                self.on_complete.set_result(True)
+                self._on_complete.set_result(True)
 
         try:
-            async with timeout(self.REQUEST_TIMEOUT) as cm:
+            async with timeout(REQUEST_TIMEOUT) as cm:
                 transport, _ = await loop.create_datagram_endpoint(
-                    lambda: _DatagramProtocol(
-                        message.bytearray_of, on_complete),
-                    remote_addr=(device_ip, self.CONTROLLER_PORT),
+                    lambda: _DatagramProtocol(message, on_complete),
+                    remote_addr=(device_ip, CONTROLLER_PORT),
                     allow_broadcast=True)
 
                 # wait for response to be received.
@@ -108,13 +110,13 @@ class FireplaceDatagram:
             if cm.expired:
                 if transport:
                     transport.close()
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
 
             on_complete.result()
 
             return responses
 
-        except (OSError, asyncio.TimeoutError) as ex:
+        except (OSError, TimeoutError) as ex:
             raise ConnectionError("Unable to send UDP") from ex
 
     """ The rest of this module is to support testing """
@@ -123,7 +125,7 @@ class FireplaceDatagram:
         tab = "    "
         print(indent + "FireplaceDatagram:")
         print(indent + tab + "Device IP: {0}".format(self._ip))
-        print(indent + tab + "Discovery: {0}".format(self._discovery))
+        print(indent + tab + "Event Loop: {0}".format(self._event_loop))
         if self._fail_exception is not None:
             print(indent + tab +
                   "Fail Exception: {0}".format(self._fail_exception))

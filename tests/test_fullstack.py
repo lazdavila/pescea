@@ -1,9 +1,9 @@
 """Test for controller"""
 
 from asyncio import Event
-from pescea import Controller, Listener, discovery
 from pytest import raises, mark
 
+from pescea import Controller, Listener, discovery
 
 async def test_full_stack(event_loop):
     controllers = []

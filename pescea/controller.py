@@ -1,12 +1,13 @@
 """Escea Network Controller module"""
 
-import asyncio
 import logging
-from asyncio import Lock
+import asyncio
+
 from enum import Enum
 from typing import Dict, Union, Optional
 
-from .message import FireplaceMessage
+# Pescea imports:
+from .message import FireplaceMessage, CommandID, ResponseID, MIN_SET_TEMP, MAX_SET_TEMP
 from .datagram import FireplaceDatagram
 
 _LOG = logging.getLogger("pescea.controller")
@@ -14,45 +15,41 @@ _LOG = logging.getLogger("pescea.controller")
 # Seconds between updates - nothing changes quickly with fireplaces
 REFRESH_INTERVAL = 30.0
 
+# Time to wait for results from server
+REQUEST_TIMEOUT = 5
+
+# Cool down period for retrying to connect to the fireplace
+CONNECT_RETRY_TIMEOUT = 20
+
+# Time to wait for fireplace to start up / shut down
+# TODO: Figure out what needs to be done (show "Waiting"?)
+START_STOP_WAIT_TIME = 120
+
+class Fan(Enum):
+    """All fan modes"""
+    FLAME_EFFECT = 'FlameEffect'
+    AUTO = 'Auto'
+    FAN_BOOST = 'FanBoost'
+
+class DictEntries(Enum):
+    """Available controller attributes - Internal Use Only"""
+    IP_ADDRESS = "IPAddress"
+    DEVICE_UID = "DeviceUId"
+    HAS_NEW_TIMERS = "HasNewTimers"
+    FIRE_IS_ON = "FireIsOn"
+    FAN_MODE = "FanMode"
+    DESIRED_TEMP = "DesiredTemp"
+    CURRENT_TEMP = "CurrentTemp"
 
 class Controller:
     """Interface to Escea controller"""
 
-    class Fan(Enum):
-        """All fan modes"""
-        FLAME_EFFECT = 'FlameEffect'
-        AUTO = 'Auto'
-        FAN_BOOST = 'FanBoost'
-
     # DictValue = Union[str, int, float]
     # ControllerData = Dict[str, DictValue]
 
-    class DictEntries(Enum):
-        """Available controller attributes"""
-        IP_ADDRESS = "IPAddress"
-        DEVICE_UID = "DeviceUId"
-        HAS_NEW_TIMERS = "HasNewTimers"
-        FIRE_IS_ON = "FireIsOn"
-        FAN_MODE = "FanMode"
-        DESIRED_TEMP = "DesiredTemp"
-        CURRENT_TEMP = "CurrentTemp"
 
     DictValue = Union[str, int, float, bool, Fan]
     ControllerData = Dict[DictEntries, DictValue]
-
-    REQUEST_TIMEOUT = 5
-    """Time to wait for results from server."""
-
-    CONNECT_RETRY_TIMEOUT = 20
-    """Cool-down period for retrying to connect to the fireplace"""
-
-    # TODO: Figure out what needs to be done (show "Waiting"?)
-    START_STOP_WAIT_TIME = 120
-    """Time to wait for fireplace to start up / shut down"""
-
-    MIN_TEMP = FireplaceMessage.MIN_SET_TEMP
-    MAX_TEMP = FireplaceMessage.MAX_SET_TEMP
-    """Target temperature limits"""
 
     def __init__(self, discovery, device_uid: str,
                  device_ip: str) -> None:
@@ -80,17 +77,17 @@ class Controller:
             current temperature
         """
         self._system_settings = {}  # type: Controller.ControllerData
-        self._system_settings[self.DictEntries.IP_ADDRESS] = device_ip
-        self._system_settings[self.DictEntries.DEVICE_UID] = device_uid
+        self._system_settings[DictEntries.IP_ADDRESS] = device_ip
+        self._system_settings[DictEntries.DEVICE_UID] = device_uid
 
         self._initialised = False
         self._fail_exception = None
 
-        self._sending_lock = Lock()
+        self._sending_lock = asyncio.Lock()
 
-        self._datagram = FireplaceDatagram(self.discovery, device_ip)
+        self._datagram = FireplaceDatagram(self._discovery.loop, device_ip)
 
-    async def _initialize(self) -> None:
+    async def initialize(self) -> None:
         """Initialize the controller, does not complete until the system is
         initialised."""
 
@@ -98,64 +95,64 @@ class Controller:
 
         self._initialised = True
 
-        self.discovery.loop.create_task(self._poll_loop())
+        self._discovery.loop.create_task(self._poll_loop())
 
     async def _poll_loop(self) -> None:
         while True:
             await asyncio.sleep(REFRESH_INTERVAL)
 
-            if self._discovery.is_closed:
+            if self._discovery.loop.is_closed:
                 return
 
             try:
                 await self._refresh_system()
                 _LOG.debug("Polling unit %s.",
-                           self._system_settings[self.DictEntries.DEVICE_UID])
+                           self._system_settings[DictEntries.DEVICE_UID])
             except ConnectionError as ex:
                 _LOG.debug("Poll failed due to exception %s.", repr(ex))
 
     @property
     def device_ip(self) -> str:
         """IP Address of the unit"""
-        return self._system_settings[self.DictEntries.IP_ADDRESS]
+        return self._system_settings[DictEntries.IP_ADDRESS]
 
     @property
     def device_uid(self) -> str:
         """UId of the unit (serial number)"""
-        return self._system_settings[self.DictEntries.DEVICE_UID]
+        return self._system_settings[DictEntries.DEVICE_UID]
 
     @property
     def discovery(self):
         return self._discovery
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> Optional[bool]:
         """True if the system is turned on"""
-        return self._get_system_state(self.DictEntries.FIRE_IS_ON) == True
+        return self._get_system_state(DictEntries.FIRE_IS_ON) or None
 
     async def set_on(self, value: bool) -> None:
         """Turn the system on or off.
            Async method, await to ensure command revieved by system.
            Note: After systems receives on or off command, must wait several minutes to be actioned
         """
-        await self._set_system_state(self.DictEntries.FIRE_IS_ON, value)
+        await self._set_system_state(DictEntries.FIRE_IS_ON, value)
 
     @property
-    def fan(self):
+    def fan(self) -> Optional[Fan]:
         """The current fan level."""
-        return self.Fan(self._get_system_state(self.DictEntries.FAN_MODE))
+        return self._get_system_state(DictEntries.FAN_MODE) or None
 
     async def set_fan(self, value: Fan) -> None:
         """The fan level. 
            Async method, await to ensure command revieved by system.
         """
-        await self._set_system_state(self.DictEntries.FAN_MODE, value)
+        await self._set_system_state(DictEntries.FAN_MODE, value)
 
     @property
     def desired_temp(self) -> Optional[float]:
         """fireplace DesiredTemp temperature.
         """
-        return float(self._get_system_state(self.DictEntries.DESIRED_TEMP))
+        return float(self._get_system_state(DictEntries.DESIRED_TEMP)) or None
 
     async def set_desired_temp(self, value: float):
         """fireplace DesiredTemp temperature.
@@ -168,81 +165,85 @@ class Controller:
                 Can still be set even if the mode isn't appropriate.
         """
         degrees = round(value)
-        if degrees < Controller.MIN_TEMP or degrees > Controller.MAX_TEMP:
-            raise AttributeError(
-                'Desired Temp \'{}\' is out of range'.format(degrees))
-        await self._set_system_state(self.DictEntries.DESIRED_TEMP, degrees)
+        if degrees < MIN_SET_TEMP or degrees > MAX_SET_TEMP:
+            _LOG.error("Desired Temp %s is out of range (%s-%s)", degrees, MIN_SET_TEMP, MAX_SET_TEMP)
+            return
+
+        await self._set_system_state(DictEntries.DESIRED_TEMP, degrees)
 
     @property
     def current_temp(self) -> Optional[float]:
         """The room air temperature"""
-        return float(self._get_system_state(self.DictEntries.CURRENT_TEMP)) or None
+        return float(self._get_system_state(DictEntries.CURRENT_TEMP)) or None
 
     @property
     def min_temp(self) -> float:
         """The minimum valid target (desired) temperature"""
-        return float(Controller.MIN_TEMP)
+        return float(MIN_SET_TEMP)
 
     @property
     def max_temp(self) -> float:
         """The maximum valid target (desired) temperature"""
-        return float(Controller.MAX_TEMP)
+        return float(MAX_SET_TEMP)
 
     async def _refresh_system(self, notify: bool = True) -> None:
         """Refresh the system settings."""
-        response = await self.request_status()
-        if response.response_id == FireplaceMessage.ResponseID.STATUS:
-            self._system_settings[self.DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
-            self._system_settings[self.DictEntries.FIRE_IS_ON] = response.fire_is_on
-            self._system_settings[self.DictEntries.DESIRED_TEMP] = response.desired_temp
-            self._system_settings[self.DictEntries.CURRENT_TEMP] = response.current_temp
+        response = await self._request_status()
+        if response.response_id == ResponseID.STATUS:
+            self._system_settings[DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
+            self._system_settings[DictEntries.FIRE_IS_ON]     = response.fire_is_on
+            self._system_settings[DictEntries.DESIRED_TEMP]   = response.desired_temp
+            self._system_settings[DictEntries.CURRENT_TEMP]   = response.current_temp
             if response.fan_boost_is_on:
-                self._system_settings[self.DictEntries.FAN_MODE] = Controller.Fan.FAN_BOOST
-            elif response.fire_effect_on:
-                self._system_settings[self.DictEntries.FAN_MODE] = Controller.Fan.FLAME_EFFECT
+                self._system_settings[DictEntries.FAN_MODE]   = Fan.FAN_BOOST
+            elif response.flame_effect:
+                self._system_settings[DictEntries.FAN_MODE]   = Fan.FLAME_EFFECT
             else:
-                self._system_settings[self.DictEntries.FAN_MODE] = Controller.Fan.AUTO
+                self._system_settings[DictEntries.FAN_MODE]   = Fan.AUTO
         if notify:
             self._discovery.controller_update(self)
 
-    async def request_status(self) -> FireplaceMessage:
+    async def _request_status(self) -> FireplaceMessage:
         try:
-            async with self._datagram._send_command_async(
-                    FireplaceMessage.CommandID.STATUS_PLEASE) as responses:
+            async with self._datagram.send_command(
+                    CommandID.STATUS_PLEASE) as responses:
                 await responses
                 _, response = next(iter(responses))  # just expecting one
                 return response
-        except (asyncio.TimeoutError) as ex:
+        except (TimeoutError) as ex:
             self._failed_connection(ex)
             raise ConnectionError("Unable to connect to the fireplace") \
                 from ex
 
-    def _refresh_address(self, address):
+    def refresh_address(self, address):
         """Called from discovery to update the address"""
-        self._system_settings[self.DictEntries.IP_ADDRESS] = address
+        self._system_settings[DictEntries.IP_ADDRESS] = address
         self._datagram.set_ip(address)
-        # Signal to the retry connection loop to have another go.
         if self._fail_exception:
-            self._discovery.create_task(self._retry_connection())
+            # Start polling again
+            self._fail_exception = None
+            self._discovery.loop.create_task(self._poll_loop())
 
-    def _get_system_state(self, state):
-        self._ensure_connected()
+    def _get_system_state(self, state: DictEntries):
+        if self._fail_exception:
+            return None
         return self._system_settings[state]
 
-    async def _set_system_state(self, state, value):
+    async def _set_system_state(self, state: DictEntries, value):
         if self._system_settings[state] == value:
             return
 
-        if state == self.DictEntries.FIRE_IS_ON:
+        if state == DictEntries.FIRE_IS_ON:
             if value:
-                command = FireplaceMessage.CommandID.POWER_ON
+                command = CommandID.POWER_ON
             else:
-                command = FireplaceMessage.CommandID.POWER_OFF
+                command = CommandID.POWER_OFF
 
-        elif state == self.DictEntries.DESIRED_TEMP:
-            command = FireplaceMessage.CommandID.NEW_SET_TEMP
+        elif state == DictEntries.DESIRED_TEMP:
+            command = CommandID.NEW_SET_TEMP
 
-        else:
+        elif state == DictEntries.FAN_MODE:
+
             # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
             # Any change will take one or two separate commands:
             # PART 1 -
@@ -250,30 +251,33 @@ class Controller:
             # To AUTO:
             # 1. If currently FAN_BOOST, turn off FAN_BOOST
             #    else (currently FLAME_EFFECT), turn off FLAME_EFFECT
-            if value == self.fan.AUTO:
-                if self._system_settings[state] == self.fan.FAN_BOOST:
-                    command = FireplaceMessage.CommandID.FAN_BOOST_OFF
+            if value == Fan.AUTO:
+                if self._system_settings[state] == Fan.FAN_BOOST:
+                    command = CommandID.FAN_BOOST_OFF
                 else:
-                    command = FireplaceMessage.CommandID.FLAME_EFFECT_OFF
+                    command = CommandID.FLAME_EFFECT_OFF
 
             # To FAN_BOOST:
             # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
             # 2. Turn on FAN_BOOST
-            elif value == self.fan.FAN_BOOST:
-                if self._system_settings[state] == self.fan.FLAME_EFFECT:
-                    command = FireplaceMessage.CommandID.FLAME_EFFECT_OFF
+            elif value == Fan.FAN_BOOST:
+                if self._system_settings[state] == Fan.FLAME_EFFECT:
+                    command = CommandID.FLAME_EFFECT_OFF
 
             # To FLAME_EFFECT:
             # 1. If currently FAN_BOOST, turn off FAN_BOOST
             # 2. Turn on FLAME_EFFECT
-            else:
-                if self._system_settings[state] == self.fan.FAN_BOOST:
-                    command = FireplaceMessage.CommandID.FAN_BOOST_OFF
+            elif value == Fan.FLAME_EFFECT:
+                if self._system_settings[state] == Fan.FAN_BOOST:
+                    command = CommandID.FAN_BOOST_OFF
+
+        else:
+            raise(AttributeError, "Unexpected state: {0}".format(state.value))
 
         async with self._sending_lock:
-            await self._datagram._send_command_async(command, value)
+            await self._datagram.send_command(command, value)
 
-        if (state == self.DictEntries.FAN_MODE) and (value == self.Fan.AUTO):
+        if (state == DictEntries.FAN_MODE) and (value != Fan.AUTO):
             # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
             # Any change will take one or two separate commands:
             # PART 2 -
@@ -281,17 +285,17 @@ class Controller:
             # To FAN_BOOST:
             # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
             # 2. Turn on FAN_BOOST
-            if value == self.fan.FAN_BOOST:
-                command = FireplaceMessage.CommandID.FAN_BOOST_ON
+            if value == Fan.FAN_BOOST:
+                command = CommandID.FAN_BOOST_ON
 
             # To FLAME_EFFECT:
             # 1. If currently FAN_BOOST, turn off FAN_BOOST
             # 2. Turn on FLAME_EFFECT
             else:
-                command = FireplaceMessage.CommandID.FLAME_EFFECT_ON
+                command = CommandID.FLAME_EFFECT_ON
 
             async with self._sending_lock:
-                await self._datagram._send_command_async(command, value)
+                await self._datagram.send_command(command, value)
 
         # Need to refresh immediately after setting.
         try:

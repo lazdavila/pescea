@@ -10,7 +10,7 @@ from pescea.message import FireplaceMessage
 
 from pytest import raises
 
-from .resources import TST_FIREPLACES
+from .resources import fireplaces
 
 """
 @patch.object(DiscoveryService, '_get_broadcast')
@@ -71,36 +71,36 @@ async def test_connection_lost(service, caplog):
 
 
 async def test_discovery(service: DiscoveryService):
-    assert len(service.controllers) == len(TST_FIREPLACES)
+    assert len(service.controllers) == len(fireplaces)
 
-    for ctl_uid in list(TST_FIREPLACES.keys()):
+    for ctl_uid in list(fireplaces.keys()):
 
         assert ctl_uid in service.controllers
         controller = service.controllers[ctl_uid]  # type: Controller
 
         # Check system settings are update on init
         assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
-        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == TST_FIREPLACES[ctl_uid]["IPAddress"]
-        assert controller._system_settings[Controller.DictEntries.HAS_NEW_TIMERS] == TST_FIREPLACES[ctl_uid]["HasNewTimers"]
-        assert controller._system_settings[Controller.DictEntries.FIRE_IS_ON] == TST_FIREPLACES[ctl_uid]["FireIsOn"]
-        assert controller._system_settings[Controller.DictEntries.FAN_MODE] == TST_FIREPLACES[ctl_uid]["FanMode"]
-        assert controller._system_settings[Controller.DictEntries.DESIRED_TEMP] == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
-        assert controller._system_settings[Controller.DictEntries.CURRENT_TEMP] == TST_FIREPLACES[ctl_uid]["CurrentTemp"]
+        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == fireplaces[ctl_uid]["IPAddress"]
+        assert controller._system_settings[Controller.DictEntries.HAS_NEW_TIMERS] == fireplaces[ctl_uid]["HasNewTimers"]
+        assert controller._system_settings[Controller.DictEntries.FIRE_IS_ON] == fireplaces[ctl_uid]["FireIsOn"]
+        assert controller._system_settings[Controller.DictEntries.FAN_MODE] == fireplaces[ctl_uid]["FanMode"]
+        assert controller._system_settings[Controller.DictEntries.DESIRED_TEMP] == fireplaces[ctl_uid]["DesiredTemp"]
+        assert controller._system_settings[Controller.DictEntries.CURRENT_TEMP] == fireplaces[ctl_uid]["CurrentTemp"]
 
         # check properties work
-        assert controller.device_ip == TST_FIREPLACES[ctl_uid]["IPAddress"]
+        assert controller.device_ip == fireplaces[ctl_uid]["IPAddress"]
         assert controller.device_uid == ctl_uid
-        assert controller.is_on == TST_FIREPLACES[ctl_uid]["FireIsOn"]
-        assert controller.fan == TST_FIREPLACES[ctl_uid]["FanMode"]
-        assert controller.desired_temp == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
-        assert controller.current_temp == TST_FIREPLACES[ctl_uid]["CurrentTemp"]
+        assert controller.is_on == fireplaces[ctl_uid]["FireIsOn"]
+        assert controller.fan == fireplaces[ctl_uid]["FanMode"]
+        assert controller.desired_temp == fireplaces[ctl_uid]["DesiredTemp"]
+        assert controller.current_temp == fireplaces[ctl_uid]["CurrentTemp"]
         assert controller.min_temp == FireplaceMessage.MIN_SET_TEMP
         assert controller.max_temp == FireplaceMessage.MAX_SET_TEMP
 
         # check the methods
 
         await controller.set_on(not controller.is_on)
-        assert controller.is_on != TST_FIREPLACES[ctl_uid]["FireIsOn"]
+        assert controller.is_on != fireplaces[ctl_uid]["FireIsOn"]
 
         for fan_mode in Controller.Fan:
             await controller.set_fan(fan_mode)
@@ -115,29 +115,29 @@ async def test_discovery(service: DiscoveryService):
             assert controller.device_ip == test_addr
 
         # set settings back to test case values
-        await controller.set_on(TST_FIREPLACES[ctl_uid]["FireIsOn"])
-        assert controller.is_on == TST_FIREPLACES[ctl_uid]["FireIsOn"]
+        await controller.set_on(fireplaces[ctl_uid]["FireIsOn"])
+        assert controller.is_on == fireplaces[ctl_uid]["FireIsOn"]
 
-        await controller.set_fan(TST_FIREPLACES[ctl_uid]["FanMode"])
-        assert controller.fan == TST_FIREPLACES[ctl_uid]["FanMode"]
+        await controller.set_fan(fireplaces[ctl_uid]["FanMode"])
+        assert controller.fan == fireplaces[ctl_uid]["FanMode"]
 
-        await controller.set_desired_temp(TST_FIREPLACES[ctl_uid]["DesiredTemp"])
-        assert controller.desired_temp == TST_FIREPLACES[ctl_uid]["DesiredTemp"]
+        await controller.set_desired_temp(fireplaces[ctl_uid]["DesiredTemp"])
+        assert controller.desired_temp == fireplaces[ctl_uid]["DesiredTemp"]
 
-        await controller._refresh_address(TST_FIREPLACES[ctl_uid]["IPAddress"])
-        assert controller.device_ip == TST_FIREPLACES[ctl_uid]["IPAddress"]
+        await controller._refresh_address(fireplaces[ctl_uid]["IPAddress"])
+        assert controller.device_ip == fireplaces[ctl_uid]["IPAddress"]
 
 
 async def test_ip_addr_change(service: DiscoveryService, caplog):
-    assert len(service.controllers) == len(TST_FIREPLACES)
+    assert len(service.controllers) == len(fireplaces)
 
-    for ctl_uid in list(TST_FIREPLACES.keys()):
+    for ctl_uid in list(fireplaces.keys()):
 
         assert ctl_uid in service.controllers
         controller = service.controllers[ctl_uid]  # type: Controller
 
         assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
-        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == TST_FIREPLACES[ctl_uid]["IPAddress"]
+        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == fireplaces[ctl_uid]["IPAddress"]
 
         for test_addr in '1.1.1.1', '2.2.2.2', '3.3.3.3':
 

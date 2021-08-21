@@ -1,78 +1,76 @@
 """Escea Fireplace Message module"""
 
 import logging
+
 from enum import Enum
-from typing import Any, Dict, List, Union, Optional
 
 _LOG = logging.getLogger("pescea.message")
 
+# The same message structure is used for commands and responses:
+MESSAGE_LENGTH = 15
+MSG_OFFSET_START_BYTE = 0  # Byte 1: Start Byte code
+MSG_OFFSET_ID = 1          # Byte 2: Command / Response ID
+MSG_OFFSET_DATA_LENGTH = 2  # Byte 3: Data Length
+# Byte 4..13: Data (0 filled / don'tcare after Data Length)
+MSG_OFFSET_DATA_START = 3
+MSG_OFFSET_DATA_END = 12
+# Byte 14: CRC (Sum Bytes 2 to 13, overflowing on 256)
+MSG_OFFSET_CRC = 13
+MSG_OFFSET_END_BYTE = 14   # Byte 15: End Byte code
+
+# Data structure for STATUS response:
+# Data Byte 1: (boolean) Fireplace has new timers (not used)
+DATA_OFFSET_TIMERS = 0
+DATA_OFFSET_FIRE_ON = 1      # Data Byte 2: (boolean) Fire is On
+DATA_OFFSET_BOOST_ON = 2     # Data Byte 3: (boolean) Fan Boost is on
+DATA_OFFSET_EFFECT_ON = 3    # Data Byte 4: (boolean) Flame Effect is on
+# Data Byte 5: (unsigned int) Desired Temperature
+DATA_OFFSET_DESIRED_TEMP = 4
+# Data Byte 6: (unsigned int) Room Temperature
+DATA_OFFSET_CURRENT_TEMP = 5
+
+# Data structure for I_AM_A_FIRE response:
+# Data Bytes 1..4: (Unsigned Long, big Endian) Serial Number (use for UID)
+DATA_OFFSET_SERIAL = 0
+# Data Byte 5..6: (Unsigned Long, big Endian) PIN (not used)
+DATA_OFFSET_PIN = 4
+
+# Preconfigured start/end characters:
+MESSAGE_START_BYTE = 0x47
+MESSAGE_END_BYTE = 0x46
+
+# Valid command identifiers:
+class CommandID(Enum):
+    STATUS_PLEASE = 0x31
+    POWER_ON = 0x39
+    POWER_OFF = 0x3a
+    SEARCH_FOR_FIRES = 0x50
+    FAN_BOOST_ON = 0x37
+    FAN_BOOST_OFF = 0x38
+    FLAME_EFFECT_ON = 0x56
+    FLAME_EFFECT_OFF = 0x55
+    NEW_SET_TEMP = 0x57
+
+class ResponseID(Enum):
+    STATUS = 0x80
+    POWER_ON_ACK = 0x8d
+    POWER_OFF_ACK = 0x8f
+    FAN_BOOST_ON_ACK = 0x8a
+    FAN_BOOST_OFF_ACK = 0x8b
+    FLAME_EFFECT_ON_ACK = 0x61
+    FLAME_EFFECT_OFF_ACK = 0x60
+    NEW_SET_TEMP_ACK = 0x66
+    I_AM_A_FIRE = 0x99
+
+# Acceptable limits when commanding NEW_SET_TEMP:
+MIN_SET_TEMP = 4
+MAX_SET_TEMP = 30
 
 class FireplaceMessage:
 
     """ Implements messages to and from the fireplace.
         Refer to Escea Fireplace LAN Comms Spec for details.
     """
-
-    # The same message structure is used for commands and responses:
-    MESSAGE_LENGTH = 15
-    MSG_OFFSET_START_BYTE = 0  # Byte 1: Start Byte code
-    MSG_OFFSET_ID = 1          # Byte 2: Command / Response ID
-    MSG_OFFSET_DATA_LENGTH = 2  # Byte 3: Data Length
-    # Byte 4..13: Data (0 filled / don'tcare after Data Length)
-    MSG_OFFSET_DATA_START = 3
-    MSG_OFFSET_DATA_END = 12
-    # Byte 14: CRC (Sum Bytes 2 to 13, overflowing on 256)
-    MSG_OFFSET_CRC = 13
-    MSG_OFFSET_END_BYTE = 14   # Byte 15: End Byte code
-
-    # Data structure for STATUS response:
-    # Data Byte 1: (boolean) Fireplace has new timers (not used)
-    DATA_OFFSET_TIMERS = 0
-    DATA_OFFSET_FIRE_ON = 1      # Data Byte 2: (boolean) Fire is On
-    DATA_OFFSET_BOOST_ON = 2     # Data Byte 3: (boolean) Fan Boost is on
-    DATA_OFFSET_EFFECT_ON = 3    # Data Byte 4: (boolean) Flame Effect is on
-    # Data Byte 5: (unsigned int) Desired Temperature
-    DATA_OFFSET_DESIRED_TEMP = 4
-    # Data Byte 6: (unsigned int) Room Temperature
-    DATA_OFFSET_CURRENT_TEMP = 5
-
-    # Data structure for I_AM_A_FIRE response:
-    # Data Bytes 1..4: (Unsigned Long, big Endian) Serial Number (use for UID)
-    DATA_OFFSET_SERIAL = 0
-    # Data Byte 5..6: (Unsigned Long, big Endian) PIN (not used)
-    DATA_OFFSET_PIN = 4
-
-    # Preconfigured start/end characters:
-    MESSAGE_START_BYTE = 0x47
-    MESSAGE_END_BYTE = 0x46
-
-    # Valid command identifiers:
-    class CommandID(Enum):
-        STATUS_PLEASE = 0x31
-        POWER_ON = 0x39
-        POWER_OFF = 0x3a
-        SEARCH_FOR_FIRES = 0x50
-        FAN_BOOST_ON = 0x37
-        FAN_BOOST_OFF = 0x38
-        FLAME_EFFECT_ON = 0x56
-        FLAME_EFFECT_OFF = 0x55
-        NEW_SET_TEMP = 0x57
-
-    class ResponseID(Enum):
-        STATUS = 0x80
-        POWER_ON_ACK = 0x8d
-        POWER_OFF_ACK = 0x8f
-        FAN_BOOST_ON_ACK = 0x8a
-        FAN_BOOST_OFF_ACK = 0x8b
-        FLAME_EFFECT_ON_ACK = 0x61
-        FLAME_EFFECT_OFF_ACK = 0x60
-        NEW_SET_TEMP_ACK = 0x66
-        I_AM_A_FIRE = 0x99
-
-    # Acceptable limits when commanding NEW_SET_TEMP:
-    MIN_SET_TEMP = 4
-    MAX_SET_TEMP = 30
-
     def _initialise_data(self) -> None:
         """Default all attributes
         """
@@ -107,29 +105,29 @@ class FireplaceMessage:
 
             # Build outgoing message:
 
-            self._bytearray = bytearray(self.MESSAGE_LENGTH)
+            self._bytearray = bytearray(MESSAGE_LENGTH)
 
-            self._bytearray[self.MSG_OFFSET_START_BYTE] = self.MESSAGE_START_BYTE
-            self._bytearray[self.MSG_OFFSET_END_BYTE] = self.MESSAGE_END_BYTE
+            self._bytearray[MSG_OFFSET_START_BYTE] = MESSAGE_START_BYTE
+            self._bytearray[MSG_OFFSET_END_BYTE] = MESSAGE_END_BYTE
 
-            self._bytearray[self.MSG_OFFSET_ID] = (self._id).value
+            self._bytearray[MSG_OFFSET_ID] = (self._id).value
 
-            if self._id == self.CommandID.NEW_SET_TEMP:
+            if self._id == CommandID.NEW_SET_TEMP:
                 # For the desired temperature (rest have no data)
-                if self._desired_temp < self.MIN_SET_TEMP or self._desired_temp> self.MAX_SET_TEMP:
+                if self._desired_temp < MIN_SET_TEMP or self._desired_temp> MAX_SET_TEMP:
                     raise ValueError
-                self._bytearray[self.MSG_OFFSET_DATA_LENGTH] = 1
+                self._bytearray[MSG_OFFSET_DATA_LENGTH] = 1
                 if self._desired_temp is not None:
-                    self._bytearray[self.MSG_OFFSET_DATA_START] = self._desired_temp
+                    self._bytearray[MSG_OFFSET_DATA_START] = self._desired_temp
                 else:
                     raise(ValueError)
 
             # Calculate CRC
             self._crc_sum = 0
-            for i in range(self.MSG_OFFSET_ID, self.MSG_OFFSET_DATA_END):
+            for i in range(MSG_OFFSET_ID, MSG_OFFSET_DATA_END):
                 self._crc_sum += self._bytearray[i]
             self._crc_sum = self._crc_sum % 255
-            self._bytearray[self.MSG_OFFSET_CRC] = self._crc_sum
+            self._bytearray[MSG_OFFSET_CRC] = self._crc_sum
 
         elif incoming is not None:
             """Create a response Message from incoming buffer
@@ -142,64 +140,64 @@ class FireplaceMessage:
             self._bytearray = incoming
 
             # Check message integrity
-            if len(incoming) != self.MESSAGE_LENGTH:
+            if len(incoming) != MESSAGE_LENGTH:
                 raise ValueError(
                     'Message:' + self._bytearray.hex() + ' Has incorrect message length: {0}'.format(len(incoming)))
 
-            if incoming[self.MSG_OFFSET_START_BYTE] != self.MESSAGE_START_BYTE:
+            if incoming[MSG_OFFSET_START_BYTE] != MESSAGE_START_BYTE:
                 raise ValueError(
-                    'Message:'+self._bytearray.hex()+' Has Invalid message start byte: {0}'.format(self.MESSAGE_START_BYTE))
+                    'Message:'+self._bytearray.hex()+' Has Invalid message start byte: {0}'.format(MESSAGE_START_BYTE))
 
-            if incoming[self.MSG_OFFSET_END_BYTE] != self.MESSAGE_END_BYTE:
+            if incoming[MSG_OFFSET_END_BYTE] != MESSAGE_END_BYTE:
                 raise ValueError(
-                    'Message:'+self._bytearray.hex()+' Has Invalid message end byte: {0}'.format(self.MSG_OFFSET_END_BYTE))
+                    'Message:'+self._bytearray.hex()+' Has Invalid message end byte: {0}'.format(MSG_OFFSET_END_BYTE))
 
             # Check CRC
             self._crc_sum = 0
-            for i in range(self.MSG_OFFSET_ID, self.MSG_OFFSET_DATA_END):
+            for i in range(MSG_OFFSET_ID, MSG_OFFSET_DATA_END):
                 self._crc_sum += incoming[i]
 
             self._crc_sum = self._crc_sum % 255
-            if self._crc_sum != incoming[self.MSG_OFFSET_CRC]:
+            if self._crc_sum != incoming[MSG_OFFSET_CRC]:
                 raise ValueError('Message:'+self._bytearray.hex()
-                    +' Has Invalid CRC: {0}'.format(incoming[self.MSG_OFFSET_CRC]) 
+                    +' Has Invalid CRC: {0}'.format(incoming[MSG_OFFSET_CRC]) 
                     +' Expecting: {0}'.format(self._crc_sum))
 
             self._is_command = False
-            self._id = self.ResponseID(incoming[self.MSG_OFFSET_ID])
+            self._id = ResponseID(incoming[MSG_OFFSET_ID])
 
             # Extract data
-            if (self._id) == self.ResponseID.STATUS:
-                if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
+            if (self._id) == ResponseID.STATUS:
+                if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
                     raise ValueError('Message:'+self._bytearray.hex()
-                        +' Has Invalid Data Length: {0}'.format(incoming[self.MSG_OFFSET_DATA_LENGTH])
+                        +' Has Invalid Data Length: {0}'.format(incoming[MSG_OFFSET_DATA_LENGTH])
                         +' Expecting: 6')
                 self._has_new_timers = bool(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_TIMERS])
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_TIMERS])
                 self._fire_on = bool(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_FIRE_ON])
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_FIRE_ON])
                 self._fan_boost_on = bool(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_BOOST_ON])
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_BOOST_ON])
                 self._effect_on = bool(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_EFFECT_ON])
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_EFFECT_ON])
                 self._desired_temp = int(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_DESIRED_TEMP])
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_DESIRED_TEMP])
                 self._current_temp = int(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_CURRENT_TEMP])
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_CURRENT_TEMP])
 
-            elif (self._id) == self.ResponseID.I_AM_A_FIRE:
-                if incoming[self.MSG_OFFSET_DATA_LENGTH] != 6:
+            elif (self._id) == ResponseID.I_AM_A_FIRE:
+                if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
                     raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' +
-                                     incoming[self.MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
+                                     incoming[MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
                 self._serial = int.from_bytes(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_SERIAL+4], byteorder='big', signed=False)
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL:MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL+4], byteorder='big', signed=False)
                 self._pin = int.from_bytes(
-                    incoming[self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN:self.MSG_OFFSET_DATA_START+self.DATA_OFFSET_PIN+2], byteorder='big', signed=False)
+                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_PIN:MSG_OFFSET_DATA_START+DATA_OFFSET_PIN+2], byteorder='big', signed=False)
 
             else:
-                if int(incoming[self.MSG_OFFSET_DATA_LENGTH]) != 0:
+                if int(incoming[MSG_OFFSET_DATA_LENGTH]) != 0:
                     raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' + int(
-                        incoming[self.MSG_OFFSET_DATA_LENGTH]) + ' Expecting:' + 0)
+                        incoming[MSG_OFFSET_DATA_LENGTH]) + ' Expecting:' + 0)
         else:
             # Screwed up the constructor
             raise(ValueError)
@@ -252,33 +250,33 @@ class FireplaceMessage:
 
     @property
     def crc(self) -> int:
-        return self.crc
+        return self._crc_sum
 
     @property
     def expected_response(self) -> ResponseID:
-        if self._id == self.CommandID.STATUS_PLEASE:
-            return self.ResponseID.STATUS
-        elif self._id == self.CommandID.POWER_ON:
-            return self.ResponseID.POWER_ON_ACK
-        elif self._id == self.CommandID.POWER_OFF:
-            return self.ResponseID.POWER_OFF_ACK
-        elif self._id == self.CommandID.SEARCH_FOR_FIRES:
-            return self.ResponseID.I_AM_A_FIRE
-        elif self._id == self.CommandID.FAN_BOOST_ON:
-            return self.ResponseID.FAN_BOOST_ON_ACK
-        elif self._id == self.CommandID.FAN_BOOST_OFF:
-            return self.ResponseID.FAN_BOOST_OFF_ACK
-        elif self._id == self.CommandID.FLAME_EFFECT_ON:
-            return self.ResponseID.FLAME_EFFECT_ON_ACK
-        elif self._id == self.CommandID.FLAME_EFFECT_OFF:
-            return self.ResponseID.FLAME_EFFECT_OFF_ACK
-        elif self._id == self.CommandID.NEW_SET_TEMP:
-            return self.ResponseID.NEW_SET_TEMP_ACK
+        if self._id == CommandID.STATUS_PLEASE:
+            return ResponseID.STATUS
+        elif self._id == CommandID.POWER_ON:
+            return ResponseID.POWER_ON_ACK
+        elif self._id == CommandID.POWER_OFF:
+            return ResponseID.POWER_OFF_ACK
+        elif self._id == CommandID.SEARCH_FOR_FIRES:
+            return ResponseID.I_AM_A_FIRE
+        elif self._id == CommandID.FAN_BOOST_ON:
+            return ResponseID.FAN_BOOST_ON_ACK
+        elif self._id == CommandID.FAN_BOOST_OFF:
+            return ResponseID.FAN_BOOST_OFF_ACK
+        elif self._id == CommandID.FLAME_EFFECT_ON:
+            return ResponseID.FLAME_EFFECT_ON_ACK
+        elif self._id == CommandID.FLAME_EFFECT_OFF:
+            return ResponseID.FLAME_EFFECT_OFF_ACK
+        elif self._id == CommandID.NEW_SET_TEMP:
+            return ResponseID.NEW_SET_TEMP_ACK
         else:
             raise(ValueError)
 
     @property
-    def bytearray_of(self) -> bytearray:
+    def bytearray_(self) -> bytearray:
         return self._bytearray
 
     """ The rest of the class is to support testing """
@@ -293,65 +291,65 @@ class FireplaceMessage:
         """ Create a dummy message for testing purposes.
         """
 
-        message = bytearray(FireplaceMessage.MESSAGE_LENGTH)
+        message = bytearray(MESSAGE_LENGTH)
 
         if force_start_byte_error:
-            message[FireplaceMessage.MSG_OFFSET_START_BYTE] = 0
+            message[MSG_OFFSET_START_BYTE] = 0
         else:
-            message[FireplaceMessage.MSG_OFFSET_START_BYTE] = FireplaceMessage.MESSAGE_START_BYTE
+            message[MSG_OFFSET_START_BYTE] = MESSAGE_START_BYTE
 
         if force_end_byte_error:
-            message[FireplaceMessage.MSG_OFFSET_END_BYTE] = 0
+            message[MSG_OFFSET_END_BYTE] = 0
         else:
-            message[FireplaceMessage.MSG_OFFSET_END_BYTE] = FireplaceMessage.MESSAGE_END_BYTE
+            message[MSG_OFFSET_END_BYTE] = MESSAGE_END_BYTE
 
         if force_id_error:
-            message[FireplaceMessage.MSG_OFFSET_ID] = 0
+            message[MSG_OFFSET_ID] = 0
         else:
-            message[FireplaceMessage.MSG_OFFSET_ID] = response_id.value
+            message[MSG_OFFSET_ID] = response_id.value
 
-        if response_id == FireplaceMessage.ResponseID.STATUS:
-            message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 6
-            message[FireplaceMessage.MSG_OFFSET_DATA_START] = desired_temp
-            message[FireplaceMessage.MSG_OFFSET_DATA_START +
-                    FireplaceMessage.DATA_OFFSET_TIMERS] = has_new_timers
-            message[FireplaceMessage.MSG_OFFSET_DATA_START +
-                    FireplaceMessage.DATA_OFFSET_FIRE_ON] = fire_on
-            message[FireplaceMessage.MSG_OFFSET_DATA_START +
-                    FireplaceMessage.DATA_OFFSET_BOOST_ON] = fan_boost_on
-            message[FireplaceMessage.MSG_OFFSET_DATA_START +
-                    FireplaceMessage.DATA_OFFSET_EFFECT_ON] = effect_on
-            message[FireplaceMessage.MSG_OFFSET_DATA_START +
-                    FireplaceMessage.DATA_OFFSET_DESIRED_TEMP] = desired_temp
-            message[FireplaceMessage.MSG_OFFSET_DATA_START +
-                    FireplaceMessage.DATA_OFFSET_CURRENT_TEMP] = current_temp
+        if response_id == ResponseID.STATUS:
+            message[MSG_OFFSET_DATA_LENGTH] = 6
+            message[MSG_OFFSET_DATA_START] = desired_temp
+            message[MSG_OFFSET_DATA_START +
+                    DATA_OFFSET_TIMERS] = has_new_timers
+            message[MSG_OFFSET_DATA_START +
+                    DATA_OFFSET_FIRE_ON] = fire_on
+            message[MSG_OFFSET_DATA_START +
+                    DATA_OFFSET_BOOST_ON] = fan_boost_on
+            message[MSG_OFFSET_DATA_START +
+                    DATA_OFFSET_EFFECT_ON] = effect_on
+            message[MSG_OFFSET_DATA_START +
+                    DATA_OFFSET_DESIRED_TEMP] = desired_temp
+            message[MSG_OFFSET_DATA_START +
+                    DATA_OFFSET_CURRENT_TEMP] = current_temp
 
-        elif response_id == FireplaceMessage.ResponseID.I_AM_A_FIRE:
-            message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 6
+        elif response_id == ResponseID.I_AM_A_FIRE:
+            message[MSG_OFFSET_DATA_LENGTH] = 6
             serial_segment = uid.to_bytes(
                 length=4, byteorder='big', signed=False)
             pin_segment = int(9999).to_bytes(
                 length=2, byteorder='big', signed=False)
             for i in range(len(serial_segment)):
-                message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_SERIAL+i] = serial_segment[i]
+                message[MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL+i] = serial_segment[i]
             for i in range(len(pin_segment)):       
-                message[FireplaceMessage.MSG_OFFSET_DATA_START+FireplaceMessage.DATA_OFFSET_PIN+i] = pin_segment[i]
+                message[MSG_OFFSET_DATA_START+DATA_OFFSET_PIN+i] = pin_segment[i]
 
         else:
-            message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] = 0
+            message[MSG_OFFSET_DATA_LENGTH] = 0
 
         if force_data_len_error:
-            message[FireplaceMessage.MSG_OFFSET_DATA_LENGTH] += 1
+            message[MSG_OFFSET_DATA_LENGTH] += 1
 
         if force_crc_error:
-            message[FireplaceMessage.MSG_OFFSET_CRC] = 0
+            message[MSG_OFFSET_CRC] = 0
         else:
             # Calculate CRC
             crc_sum = 0
-            for i in range(FireplaceMessage.MSG_OFFSET_ID, FireplaceMessage.MSG_OFFSET_DATA_END):
+            for i in range(MSG_OFFSET_ID, MSG_OFFSET_DATA_END):
                 crc_sum += message[i]
             crc_sum = crc_sum % 255
-            message[FireplaceMessage.MSG_OFFSET_CRC] = crc_sum
+            message[MSG_OFFSET_CRC] = crc_sum
 
         return message
 
@@ -359,15 +357,15 @@ class FireplaceMessage:
         tab = "    "
         print(indent + "FireplaceMessage:")
         print(indent + tab +
-              "Byte array: " + self.bytearray_of.hex())
+              "Byte array: " + self.bytearray_.hex())
         print(indent + tab + "Structure:")
         if self._is_command is not None:
             if self._is_command:
                 print(indent + tab + tab +
-                      "Command ID: " + FireplaceMessage.CommandID(self._id).name())
+                      "Command ID: " + CommandID(self._id).name())
             else:
                 print(indent + tab + tab +
-                      "Response ID: " + FireplaceMessage.ResponseID(self._id).name())
+                      "Response ID: " + ResponseID(self._id).name())
 
         if self._has_new_timers is not None:
             print(indent + tab + tab +
