@@ -132,6 +132,9 @@ class FireplaceMessage:
         elif incoming is not None:
             """Create a response Message from incoming buffer
 
+            Note:
+                Can also be used with a Command bytearray for test purposes
+
             Raises:
                 ValueError if message content does not match specification
             """
@@ -142,15 +145,15 @@ class FireplaceMessage:
             # Check message integrity
             if len(incoming) != MESSAGE_LENGTH:
                 raise ValueError(
-                    'Message:' + self._bytearray.hex() + ' Has incorrect message length: {0}'.format(len(incoming)))
+                    'Message:' + incoming.hex() + ' Has incorrect message length: {0}'.format(len(incoming)))
 
             if incoming[MSG_OFFSET_START_BYTE] != MESSAGE_START_BYTE:
                 raise ValueError(
-                    'Message:'+self._bytearray.hex()+' Has Invalid message start byte: {0}'.format(MESSAGE_START_BYTE))
+                    'Message:'+incoming.hex()+' Has Invalid message start byte: {0}'.format(MESSAGE_START_BYTE))
 
             if incoming[MSG_OFFSET_END_BYTE] != MESSAGE_END_BYTE:
                 raise ValueError(
-                    'Message:'+self._bytearray.hex()+' Has Invalid message end byte: {0}'.format(MSG_OFFSET_END_BYTE))
+                    'Message:'+incoming.hex()+' Has Invalid message end byte: {0}'.format(MSG_OFFSET_END_BYTE))
 
             # Check CRC
             self._crc_sum = 0
@@ -159,48 +162,72 @@ class FireplaceMessage:
 
             self._crc_sum = self._crc_sum % 255
             if self._crc_sum != incoming[MSG_OFFSET_CRC]:
-                raise ValueError('Message:'+self._bytearray.hex()
+                raise ValueError('Message:'+incoming.hex()
                     +' Has Invalid CRC: {0}'.format(incoming[MSG_OFFSET_CRC]) 
                     +' Expecting: {0}'.format(self._crc_sum))
 
-            self._is_command = False
-            self._id = ResponseID(incoming[MSG_OFFSET_ID])
+            # Normal use: Decode incoming responses from fireplace:
+            if incoming[MSG_OFFSET_ID] in ResponseID._value2member_map_:
 
-            # Extract data
-            if (self._id) == ResponseID.STATUS:
-                if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
-                    raise ValueError('Message:'+self._bytearray.hex()
-                        +' Has Invalid Data Length: {0}'.format(incoming[MSG_OFFSET_DATA_LENGTH])
-                        +' Expecting: 6')
-                self._has_new_timers = bool(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_TIMERS])
-                self._fire_on = bool(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_FIRE_ON])
-                self._fan_boost_on = bool(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_BOOST_ON])
-                self._effect_on = bool(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_EFFECT_ON])
-                self._desired_temp = int(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_DESIRED_TEMP])
-                self._current_temp = int(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_CURRENT_TEMP])
+                self._is_command = False
+                self._id = ResponseID(incoming[MSG_OFFSET_ID])
 
-            elif (self._id) == ResponseID.I_AM_A_FIRE:
-                if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
-                    raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' +
-                                     incoming[MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
-                self._serial = int.from_bytes(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL:MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL+4], byteorder='big', signed=False)
-                self._pin = int.from_bytes(
-                    incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_PIN:MSG_OFFSET_DATA_START+DATA_OFFSET_PIN+2], byteorder='big', signed=False)
+                # Extract data
+                if (self._id) == ResponseID.STATUS:
+                    if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
+                        raise ValueError('Message:'+incoming.hex()
+                            +' Has Invalid Data Length: {0}'.format(incoming[MSG_OFFSET_DATA_LENGTH])
+                            +' Expecting: 6')
+                    self._has_new_timers = bool(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_TIMERS])
+                    self._fire_on = bool(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_FIRE_ON])
+                    self._fan_boost_on = bool(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_BOOST_ON])
+                    self._effect_on = bool(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_EFFECT_ON])
+                    self._desired_temp = int(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_DESIRED_TEMP])
+                    self._current_temp = int(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_CURRENT_TEMP])
+
+                elif (self._id) == ResponseID.I_AM_A_FIRE:
+                    if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
+                        raise ValueError('Message:'+incoming.hex()+' Has Invalid Data Length:' +
+                                        incoming[MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
+                    self._serial = int.from_bytes(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL:MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL+4], byteorder='big', signed=False)
+                    self._pin = int.from_bytes(
+                        incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_PIN:MSG_OFFSET_DATA_START+DATA_OFFSET_PIN+2], byteorder='big', signed=False)
+
+                else:
+                    if int(incoming[MSG_OFFSET_DATA_LENGTH]) != 0:
+                        raise ValueError('Message:'+incoming.hex()+' Has Invalid Data Length:' + int(
+                            incoming[MSG_OFFSET_DATA_LENGTH]) + ' Expecting:' + 0)
+
+            # For Test use only: Decode incoming command bytearray:
+            elif incoming[MSG_OFFSET_ID] in CommandID._value2member_map_:
+
+                self._is_command = True
+                self._id = CommandID(incoming[MSG_OFFSET_ID])
+
+                if self._id == CommandID.NEW_SET_TEMP:
+                    self._desired_temp = incoming[MSG_OFFSET_DATA_START]
+
+                    if incoming[MSG_OFFSET_DATA_LENGTH] != 1:
+                        raise ValueError('Message:'+incoming.hex()+' Has Invalid Data Length:'
+                                         +incoming[MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 1)
+
+                else:
+                    if incoming[MSG_OFFSET_DATA_LENGTH] != 0:
+                        raise ValueError('Message:'+incoming.hex()+' Has Invalid Data Length:' +
+                                        incoming[MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 0)
 
             else:
-                if int(incoming[MSG_OFFSET_DATA_LENGTH]) != 0:
-                    raise ValueError('Message:'+self._bytearray.hex()+' Has Invalid Data Length:' + int(
-                        incoming[MSG_OFFSET_DATA_LENGTH]) + ' Expecting:' + 0)
+                raise ValueError('Invalid message id')
+
         else:
-            # Screwed up the constructor
-            raise(ValueError)
+            raise(ValueError,"Invalid constructor")
 
     @property
     def command_id(self) -> CommandID:

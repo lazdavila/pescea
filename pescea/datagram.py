@@ -6,7 +6,7 @@
 import asyncio
 
 from asyncio import  Future, DatagramTransport
-from asyncio.events import AbstractEventLoop
+from asyncio.base_events import BaseEventLoop
 
 from async_timeout import timeout
 from typing import Any, Dict
@@ -28,7 +28,7 @@ class FireplaceDatagram:
 
     MultipleResponses = Dict[str, FireplaceMessage]
 
-    def __init__(self, event_loop: AbstractEventLoop, device_ip: str) -> None:
+    def __init__(self, event_loop: BaseEventLoop, device_ip: str) -> None:
         """Create a simple datagram client interface.
 
         Args:
@@ -81,7 +81,7 @@ class FireplaceDatagram:
 
             def datagram_received(self, data, addr):
                 response = FireplaceMessage(incoming=data)
-                if response != self._message.expected_response:
+                if response.response_id != self._message.expected_response:
                     _LOG.error(
                         "Message response id: %s does not match command id: %s",
                         response.response_id, self._message.command_id)

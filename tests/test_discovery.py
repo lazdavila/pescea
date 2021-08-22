@@ -1,8 +1,9 @@
+import pytest
 
-from asyncio import sleep
 from decimal import MAX_EMAX
 
 from asynctest.mock import patch
+from asyncio import sleep
 
 from pescea import discovery, Controller, Listener
 from pescea.discovery import DiscoveryService
@@ -12,22 +13,20 @@ from pytest import raises
 
 from .resources import fireplaces
 
-"""
-@patch.object(DiscoveryService, '_get_broadcast')
-async def test_broadcast(broadcast):
-    broadcast.return_value = []
+# @patch.object(DiscoveryService, '_get_broadcast')
+# async def test_broadcast(broadcast):
+#     broadcast.return_value = []
+#     async with discovery():
+#         assert broadcast.called
 
-    async with discovery():
-        assert broadcast.called
-"""
-
-
+@pytest.mark.asyncio
 @patch.object(DiscoveryService, '_send_broadcast')
 async def test_messages_sent(send_broadcast):
     async with discovery():
         assert send_broadcast.called
 
 
+@pytest.mark.asyncio
 @patch.object(DiscoveryService, '_send_broadcast')
 async def test_rescan(send):
     async with discovery() as service:
@@ -41,6 +40,7 @@ async def test_rescan(send):
     assert service.is_closed
 
 
+@pytest.mark.asyncio
 async def test_fail_on_connect(event_loop, caplog):
     from .conftest import MockDiscoveryService
 
@@ -59,6 +59,7 @@ async def test_fail_on_connect(event_loop, caplog):
     assert not service.controllers
 
 
+@pytest.mark.asyncio
 async def test_connection_lost(service, caplog):
     service.connection_lost(IOError("Nonspecific"))
     await sleep(0)
@@ -70,6 +71,7 @@ async def test_connection_lost(service, caplog):
     assert service.is_closed
 
 
+@pytest.mark.asyncio
 async def test_discovery(service: DiscoveryService):
     assert len(service.controllers) == len(fireplaces)
 
@@ -128,6 +130,7 @@ async def test_discovery(service: DiscoveryService):
         assert controller.device_ip == fireplaces[ctl_uid]["IPAddress"]
 
 
+@pytest.mark.asyncio
 async def test_ip_addr_change(service: DiscoveryService, caplog):
     assert len(service.controllers) == len(fireplaces)
 
@@ -149,6 +152,7 @@ async def test_ip_addr_change(service: DiscoveryService, caplog):
             assert controller.device_ip == test_addr
 
 
+@pytest.mark.asyncio
 async def test_reconnect(service, caplog):
     controller = service.controllers['000000001']  # type: Controller
     assert controller.device_uid == '000000001'
@@ -173,6 +177,7 @@ async def test_reconnect(service, caplog):
     await controller.power_on == True
 
 
+@pytest.mark.asyncio
 async def test_reconnect_listener(service):
     controller = service.controllers['000000001']  # type: Controller
 
