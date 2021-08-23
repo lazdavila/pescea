@@ -242,7 +242,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
         try:
             responses = await self._datagram.send_command(
-                CommandID.SEARCH_FOR_FIRES)
+                CommandID.SEARCH_FOR_FIRES, broadcast=True)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
         except (asyncio.TimeoutError) as ex:

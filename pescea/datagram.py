@@ -21,7 +21,7 @@ _LOG = logging.getLogger("pescea.datagram")
 CONTROLLER_PORT = 3300
 
 # Time to wait for results from server
-REQUEST_TIMEOUT = 5
+REQUEST_TIMEOUT = 6
 
 class FireplaceDatagram:
     """ Send UDP Datagrams to fireplace and receive responses """
@@ -56,7 +56,7 @@ class FireplaceDatagram:
         """
         self._ip = ip_addr
 
-    async def send_command(self, command: CommandID, data: Any = None) -> MultipleResponses:
+    async def send_command(self, command: CommandID, data: Any = None, broadcast: bool = False) -> MultipleResponses:
         """ Send command via UDP
 
             Returns received responses and IP addresses they come from
@@ -102,7 +102,7 @@ class FireplaceDatagram:
                 transport, _ = await loop.create_datagram_endpoint(
                     lambda: _DatagramProtocol(message, on_complete),
                     remote_addr=(device_ip, CONTROLLER_PORT),
-                    allow_broadcast=True)
+                    allow_broadcast=broadcast)
 
                 # wait for response to be received.
                 await on_complete
