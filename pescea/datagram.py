@@ -12,7 +12,7 @@ from async_timeout import timeout
 from typing import Any, Dict
 
 # Pescea imports:
-from .message import FireplaceMessage, CommandID
+from .message import FireplaceMessage, CommandID, expected_response
 
 import logging
 _LOG = logging.getLogger("pescea.datagram")
@@ -81,7 +81,7 @@ class FireplaceDatagram:
 
             def datagram_received(self, data, addr):
                 response = FireplaceMessage(incoming=data)
-                if response.response_id != self._message.expected_response:
+                if response.response_id != expected_response(self._message.command_id):
                     _LOG.error(
                         "Message response id: %s does not match command id: %s",
                         response.response_id, self._message.command_id)

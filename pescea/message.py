@@ -66,6 +66,29 @@ class ResponseID(Enum):
 MIN_SET_TEMP = 4
 MAX_SET_TEMP = 30
 
+def expected_response(command: CommandID) -> ResponseID:
+    """Utility function to check correct response"""
+    if command == CommandID.STATUS_PLEASE:
+        return ResponseID.STATUS
+    elif command == CommandID.POWER_ON:
+        return ResponseID.POWER_ON_ACK
+    elif command == CommandID.POWER_OFF:
+        return ResponseID.POWER_OFF_ACK
+    elif command == CommandID.SEARCH_FOR_FIRES:
+        return ResponseID.I_AM_A_FIRE
+    elif command == CommandID.FAN_BOOST_ON:
+        return ResponseID.FAN_BOOST_ON_ACK
+    elif command == CommandID.FAN_BOOST_OFF:
+        return ResponseID.FAN_BOOST_OFF_ACK
+    elif command == CommandID.FLAME_EFFECT_ON:
+        return ResponseID.FLAME_EFFECT_ON_ACK
+    elif command == CommandID.FLAME_EFFECT_OFF:
+        return ResponseID.FLAME_EFFECT_OFF_ACK
+    elif command == CommandID.NEW_SET_TEMP:
+        return ResponseID.NEW_SET_TEMP_ACK
+    else:
+        raise(ValueError)
+
 class FireplaceMessage:
 
     """ Implements messages to and from the fireplace.
@@ -279,28 +302,7 @@ class FireplaceMessage:
     def crc(self) -> int:
         return self._crc_sum
 
-    @property
-    def expected_response(self) -> ResponseID:
-        if self._id == CommandID.STATUS_PLEASE:
-            return ResponseID.STATUS
-        elif self._id == CommandID.POWER_ON:
-            return ResponseID.POWER_ON_ACK
-        elif self._id == CommandID.POWER_OFF:
-            return ResponseID.POWER_OFF_ACK
-        elif self._id == CommandID.SEARCH_FOR_FIRES:
-            return ResponseID.I_AM_A_FIRE
-        elif self._id == CommandID.FAN_BOOST_ON:
-            return ResponseID.FAN_BOOST_ON_ACK
-        elif self._id == CommandID.FAN_BOOST_OFF:
-            return ResponseID.FAN_BOOST_OFF_ACK
-        elif self._id == CommandID.FLAME_EFFECT_ON:
-            return ResponseID.FLAME_EFFECT_ON_ACK
-        elif self._id == CommandID.FLAME_EFFECT_OFF:
-            return ResponseID.FLAME_EFFECT_OFF_ACK
-        elif self._id == CommandID.NEW_SET_TEMP:
-            return ResponseID.NEW_SET_TEMP_ACK
-        else:
-            raise(ValueError)
+
 
     @property
     def bytearray_(self) -> bytearray:

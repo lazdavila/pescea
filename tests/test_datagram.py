@@ -5,7 +5,7 @@ import pytest
 from asyncio.transports import DatagramTransport
  
 from pescea.datagram import REQUEST_TIMEOUT, FireplaceDatagram
-from pescea.message import MIN_SET_TEMP, FireplaceMessage, CommandID, ResponseID
+from pescea.message import MIN_SET_TEMP, FireplaceMessage, CommandID, ResponseID, expected_response
 
 class PatchedDatagramTransport(DatagramTransport):
 
@@ -30,7 +30,7 @@ class PatchedDatagramTransport(DatagramTransport):
         elif self._command.command_id == CommandID.STATUS_PLEASE:
             self._responses.append((FireplaceMessage.mock_response(response_id= ResponseID.STATUS, fire_on=True, desired_temp=MIN_SET_TEMP), '192.168.0.111'))
         else:
-            self._responses.append((FireplaceMessage.mock_response(self._command.expected_response), '192.168.0.111'))
+            self._responses.append((FireplaceMessage.mock_response(expected_response(self._command.command_id)), '192.168.0.111'))
 
     def close(self):
         self._closed = True

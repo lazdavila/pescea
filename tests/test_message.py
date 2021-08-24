@@ -109,17 +109,3 @@ def test_i_am_fire_response():
     message = FireplaceMessage( incoming = bytesequence)      
 
     assert  message.serial_number == uid
-
-def test_expected_responses():
-
-    tests = [(CommandID.STATUS_PLEASE, ResponseID.STATUS),
-                (CommandID.POWER_OFF, ResponseID.POWER_OFF_ACK),
-                (CommandID.SEARCH_FOR_FIRES, ResponseID.I_AM_A_FIRE),
-                (CommandID.FAN_BOOST_OFF, ResponseID.FAN_BOOST_OFF_ACK),
-                (CommandID.FAN_BOOST_ON, ResponseID.FAN_BOOST_ON_ACK),
-                (CommandID.FLAME_EFFECT_OFF, ResponseID.FLAME_EFFECT_OFF_ACK),
-                (CommandID.FLAME_EFFECT_ON, ResponseID.FLAME_EFFECT_ON_ACK),
-                (CommandID.NEW_SET_TEMP, ResponseID.NEW_SET_TEMP_ACK)]
-
-    for test in tests:
-        assert  FireplaceMessage(command=test[0], set_temp=MIN_SET_TEMP).expected_response == test[1]

@@ -44,10 +44,6 @@ class DictEntries(Enum):
 class Controller:
     """Interface to Escea controller"""
 
-    # DictValue = Union[str, int, float]
-    # ControllerData = Dict[str, DictValue]
-
-
     DictValue = Union[str, int, float, bool, Fan]
     ControllerData = Dict[DictEntries, DictValue]
 
@@ -61,12 +57,6 @@ class Controller:
             device_uid: Controller UId as a string (Serial Number of unit)
             device_addr: Device network address. Usually specified as IP
                 address
-
-        Raises:
-            ConnectionAbortedError: If address is not set and more than one Escea fireplace
-                instance is discovered on the network.
-            ConnectionRefusedError: If no Escea fireplace is discovered, or no
-                device discovered at the given IP address, or the UID does not match
         """
         self._discovery = discovery
 
@@ -98,12 +88,8 @@ class Controller:
         self._discovery.loop.create_task(self._poll_loop())
 
     async def _poll_loop(self) -> None:
-        while True:
+        while not self._discovery.loop.is_closed():
             await asyncio.sleep(REFRESH_INTERVAL)
-
-            if self._discovery.loop.is_closed:
-                return
-
             try:
                 await self._refresh_system()
                 _LOG.debug("Polling unit %s.",
@@ -205,11 +191,10 @@ class Controller:
 
     async def _request_status(self) -> FireplaceMessage:
         try:
-            async with self._datagram.send_command(
-                    CommandID.STATUS_PLEASE) as responses:
-                await responses
-                _, response = next(iter(responses))  # just expecting one
-                return response
+            async with self._sending_lock:
+                responses = await self._datagram.send_command(CommandID.STATUS_PLEASE)
+            this_response = next(iter(responses)) # only expecting one
+            return responses[this_response]
         except (TimeoutError) as ex:
             self._failed_connection(ex)
             raise ConnectionError("Unable to connect to the fireplace") \
@@ -232,6 +217,8 @@ class Controller:
     async def _set_system_state(self, state: DictEntries, value):
         if self._system_settings[state] == value:
             return
+
+        command = None
 
         if state == DictEntries.FIRE_IS_ON:
             if value:
@@ -274,8 +261,9 @@ class Controller:
         else:
             raise(AttributeError, "Unexpected state: {0}".format(state.value))
 
-        async with self._sending_lock:
-            await self._datagram.send_command(command, value)
+        if command is not None:
+            async with self._sending_lock:
+                await self._datagram.send_command(command, value)
 
         if (state == DictEntries.FAN_MODE) and (value != Fan.AUTO):
             # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
