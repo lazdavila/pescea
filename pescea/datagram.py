@@ -23,10 +23,10 @@ CONTROLLER_PORT = 3300
 # Time to wait for results from server
 REQUEST_TIMEOUT = 6
 
+MultipleResponses = Dict[str, FireplaceMessage]
+
 class FireplaceDatagram:
     """ Send UDP Datagrams to fireplace and receive responses """
-
-    MultipleResponses = Dict[str, FireplaceMessage]
 
     def __init__(self, event_loop: BaseEventLoop, device_ip: str) -> None:
         """Create a simple datagram client interface.
@@ -67,7 +67,7 @@ class FireplaceDatagram:
 
         message = FireplaceMessage(command=command, set_temp=data)
 
-        responses = dict()   # type: self.MultipleResponses
+        responses = dict()   # type: MultipleResponses
 
         class _DatagramProtocol:
             def __init__(self, message : FireplaceMessage, on_complete: Future):

@@ -1,13 +1,11 @@
 """Test UDP datagram functionality """
-
-from asyncio.transports import DatagramTransport
-from logging import exception
-from pescea.message import MIN_SET_TEMP, ResponseID
+import asyncio
 import pytest
 
-import asyncio
+from asyncio.transports import DatagramTransport
  
-from pescea.datagram import REQUEST_TIMEOUT, FireplaceDatagram, FireplaceMessage, CommandID
+from pescea.datagram import REQUEST_TIMEOUT, FireplaceDatagram
+from pescea.message import MIN_SET_TEMP, FireplaceMessage, CommandID, ResponseID
 
 class PatchedDatagramTransport(DatagramTransport):
 
