@@ -91,8 +91,8 @@ class FireplaceDatagram:
 
             def error_received(self, exc):
                 _LOG.warning(
-                    "Error receiving for uid=%s failed with exception: %s",
-                    self._message.serial_number, exc.__repr__())
+                    "Error sending command=%s failed with exception: %s",
+                    self._message.command_id, str(exc))
 
             def connection_lost(self, exc):
                 self._on_complete.set_result(True)

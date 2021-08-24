@@ -46,6 +46,7 @@ class PatchedDatagramTransport(DatagramTransport):
         return response[0], response[1]
 
 async def simulate_comms(transport, protocol, broadcast : bool = False, raise_exception : Exception = None):
+    """ Handles sending a reply based on command received """
 
     if raise_exception is not None:
         # protocol.error_received(exc)
@@ -54,7 +55,6 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
            await asyncio.sleep(2*REQUEST_TIMEOUT) # exceed the timeout in request
         else:
             protocol.error_received(raise_exception)
-            await asyncio.sleep(0.1)
 
     else:
         protocol.connection_made(transport)
@@ -80,6 +80,15 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
     await asyncio.sleep(0.1)
     protocol.connection_lost(None)
 
+async def simulate_comms_patchable(transport, protocol, broadcast):
+    """ Generic pattern, overwritten by tests to generate different results"""
+    await simulate_comms(transport, protocol, broadcast)
+
+async def simulate_comms_timeout_error(transport, protocol, broadcast):
+    await simulate_comms(transport, protocol, broadcast, raise_exception = TimeoutError)
+
+async def simulate_comms_connection_error(transport, protocol, broadcast):
+    await simulate_comms(transport, protocol, broadcast, raise_exception = ConnectionError)    
 
 async def patched_create_datagram_endpoint(
         self, protocol_factory,
@@ -107,7 +116,7 @@ async def patched_create_datagram_endpoint(
 
     print("Datagram endpoint remote_addr created: "+str(remote_addr))
 
-    asyncio.create_task(simulate_comms(transport, protocol, broadcast=allow_broadcast))
+    asyncio.create_task(simulate_comms_patchable(transport, protocol, allow_broadcast))
 
     return transport, protocol
 
@@ -146,30 +155,17 @@ async def test_get_status(mocker):
     assert responses['192.168.0.111'].desired_temp == MIN_SET_TEMP
 
 
-async def patched_create_datagram_endpoint_timeout(
-        self, protocol_factory,
-        local_addr=None, remote_addr=None, *,
-        family=0, proto=0, flags=0,
-        reuse_address=None, reuse_port=None,
-        allow_broadcast=None, sock=None):
-
-    assert remote_addr is not None
-
-    transport = PatchedDatagramTransport()
-    protocol = protocol_factory()
-
-    print("Datagram endpoint remote_addr created: "+str(remote_addr))
-
-    asyncio.create_task(simulate_comms(transport, protocol, broadcast=allow_broadcast, raise_exception=TimeoutError))
-
-    return transport, protocol
- 
 @pytest.mark.asyncio
-async def test_connection_error(mocker):
+async def test_timeout_error(mocker):
 
     mocker.patch(
         'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint_timeout
+        patched_create_datagram_endpoint
+    )
+
+    mocker.patch(
+        __name__ + '.simulate_comms_patchable',
+        simulate_comms_timeout_error
     )
 
     event_loop = asyncio.get_event_loop()
@@ -177,4 +173,24 @@ async def test_connection_error(mocker):
     datagram = FireplaceDatagram(event_loop, device_ip= '192.168.0.111')
     with pytest.raises(asyncio.TimeoutError):
         responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
+    event_loop.stop()
+
+ 
+@pytest.mark.asyncio
+async def test_connection_error(mocker):
+
+    mocker.patch(
+        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
+        patched_create_datagram_endpoint
+    )
+
+    mocker.patch(
+        __name__ + '.simulate_comms_patchable',
+        simulate_comms_connection_error
+    )
+
+    event_loop = asyncio.get_event_loop()
+
+    datagram = FireplaceDatagram(event_loop, device_ip= '192.168.0.111')
+    responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
     assert len(responses) == 0
