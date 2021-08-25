@@ -255,8 +255,7 @@ class Controller:
                 or (self._state == ControllerState.BUSY \
                     and time() - self._state_changed > ON_OFF_BUSY_WAIT_TIME):
                 
-                self._state = ControllerState.READY
-                self._state_changed = time.time()
+
 
                 # We have come back to READY state.
                 # We need to try to sync the fireplace settings with our internal copies
@@ -267,8 +266,13 @@ class Controller:
                         or  (response.flame_effect != (self._system_settings[DictEntries.FAN_MODE] == Fan.FLAME_EFFECT)):
                     self._set_system_state(DictEntries.FAN_MODE, self._system_settings[DictEntries.FAN_MODE], sync=True)
 
+                # Do power last
                 if response.fire_is_on != self._system_settings[DictEntries.FIRE_IS_ON]:
                     self._set_system_state(DictEntries.FIRE_IS_ON, self._system_settings[DictEntries.FIRE_IS_ON], sync=True )
+                    self._state = ControllerState.BUSY
+                else:
+                    self._state = ControllerState.READY
+                self._state_changed = time()
 
                 # Once all those commands have been processed, now we refresh the status (recursive call but should be safe)
                 await self._refresh_system()
@@ -307,15 +311,14 @@ class Controller:
 
     async def _set_system_state(self, state: DictEntries, value, sync: bool = False):
 
-        if not sync and self._system_settings[state] == value:
-            # If we are not trying to sync up, no need to change if already there
-            return
+        if not sync:
+            if self._system_settings[state] == value \
+                    or self._state != ControllerState.READY:
+                # No need to change if we are already at desired value
+                # or if we are not in the READY state
+                return
 
         self._system_settings[state] = value
-
-        if self._state != ControllerState.READY:
-            # Don't send any updates to the fireplace unless we are in READY state
-            return
 
         command = None
 
