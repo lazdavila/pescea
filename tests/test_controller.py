@@ -4,11 +4,9 @@ from typing import Any
 from pescea.message import MAX_SET_TEMP, MIN_SET_TEMP
 import pytest
 
-from logging import exception
-
 from pescea.message import MIN_SET_TEMP, MAX_SET_TEMP, FireplaceMessage, CommandID, expected_response
 from pescea.datagram import MultipleResponses
-from pescea.controller import RETRY_INTERVAL, Fan, ControllerState, Controller, ON_OFF_BUSY_WAIT_TIME
+from pescea.controller import Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
 
 class MockFireplaceInstance():
@@ -70,11 +68,11 @@ async def test_controller_basics(mocker):
         'pescea.datagram.FireplaceDatagram.send_command',
         patched_send_command
     )
-    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.1)
+    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL',0.1)
-    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.2)
-    mocker.patch('pescea.controller.RETRY_DISCONNECTED_INTERVAL',0.5)
+    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.3)
+    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL',0.5)
 
     controller = Controller(discovery, device_uid, device_ip)
     await controller.initialize()
@@ -90,7 +88,7 @@ async def test_controller_basics(mocker):
         # Should still be BUSY waiting
         assert controller.state == ControllerState.BUSY
         assert controller.is_on is None
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
         assert controller.state == ControllerState.READY
 
     assert controller.is_on
@@ -131,8 +129,8 @@ async def test_controller_change_address(mocker):
     mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.1)
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL',0.1)
-    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.2)
-    mocker.patch('pescea.controller.RETRY_DISCONNECTED_INTERVAL',0.5)
+    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.3)
+    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL',0.5)
 
     controller = Controller(discovery, device_uid, device_ip)
     await controller.initialize()
@@ -161,8 +159,8 @@ async def test_controller_poll(mocker):
     mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.1)
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL',0.1)
-    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.2)
-    mocker.patch('pescea.controller.RETRY_DISCONNECTED_INTERVAL',0.5)
+    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.3)
+    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL',0.5)
 
     controller = Controller(discovery, device_uid, device_ip)
     await controller.initialize()
@@ -186,6 +184,7 @@ async def test_controller_poll(mocker):
     # Check the poll command has read the changed status
     assert not controller.is_on
 
+        
 @pytest.mark.asyncio
 async def test_controller_disconnect_reconnect(mocker):
 
@@ -201,8 +200,8 @@ async def test_controller_disconnect_reconnect(mocker):
     mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.1)
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL',0.1)
-    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.2)
-    mocker.patch('pescea.controller.RETRY_DISCONNECTED_INTERVAL',0.5)
+    mocker.patch('pescea.controller.RETRY_TIMEOUT',0.3)
+    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL',0.5)
 
     controller = Controller(discovery, device_uid, device_ip)
     await controller.initialize()
@@ -210,13 +209,18 @@ async def test_controller_disconnect_reconnect(mocker):
     assert controller.state == ControllerState.READY
 
     test_fireplace.force_no_response = True
-    await asyncio.sleep(0.3)
 
+    await asyncio.sleep(0.2)
+    assert controller.state == ControllerState.NON_RESPONSIVE
+
+    await asyncio.sleep(0.2)
     assert controller.state == ControllerState.DISCONNECTED
 
     new_ip = '192.168.0.222'
     controller.refresh_address(new_ip)
     assert controller.device_ip == new_ip
 
-    await asyncio.sleep(0.2)
+    test_fireplace.force_no_response = False
+    await asyncio.sleep(0.3)
+    
     assert controller.state == ControllerState.READY

@@ -1,7 +1,5 @@
 import pytest
 
-from decimal import MAX_EMAX
-
 from asynctest.mock import patch
 from asyncio import sleep
 
@@ -13,17 +11,11 @@ from pytest import raises
 
 from .resources import fireplaces
 
-# @patch.object(DiscoveryService, '_get_broadcast')
-# async def test_broadcast(broadcast):
-#     broadcast.return_value = []
-#     async with discovery():
-#         assert broadcast.called
-
 @pytest.mark.asyncio
 @patch.object(DiscoveryService, '_send_broadcast')
-async def test_messages_sent(send_broadcast):
+async def test_broadcasts_sent(send):
     async with discovery():
-        assert send_broadcast.called
+        assert send.called
 
 
 @pytest.mark.asyncio

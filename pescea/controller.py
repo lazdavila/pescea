@@ -16,18 +16,18 @@ _LOG = logging.getLogger("pescea.controller")
 # Time to wait for results from UDP command to server
 REQUEST_TIMEOUT = 5
 
+# Seconds between updates under normal conditions
+#  - nothing changes quickly with fireplaces
+REFRESH_INTERVAL = 30.0
+
 # Retry rate when first get disconnected
 RETRY_INTERVAL = 10.0
 
 # Timeout to stop retrying and reduce poll rate (and notify Discovery)
-RETRY_TIMEOUT = 180.0
+RETRY_TIMEOUT = 60.0
 
 # Time to wait when have been disconnected longer than RETRY_TIMOUT
-RETRY_DISCONNECTED_INTERVAL = 300.0
-
-# Seconds between updates under normal conditions
-#  - nothing changes quickly with fireplaces
-REFRESH_INTERVAL = 30.0
+DISCONNECTED_INTERVAL = 300.0
 
 # Time to wait for fireplace to start up / shut down
 # - Commands are stored, but not sent to the fireplace until it has settled
@@ -43,13 +43,17 @@ class ControllerState(Enum):
         When toggling the fire power:
             The Controller remains BUSY for ON_OFF_BUSY_WAIT_TIME:
                 - The Controller buffers requests but does not send to the Fireplace
-        When there is no response from a Fireplace:
+        When responses are missed (expected as we are using UDP datagrams):
+            The Controller is NON_RESPONSIVE
+                - The Controller will poll at a (quicker) retry rate
+        When there are no comms for a prolonged period:
             The Controller enters DISCONNECTED state
                 - The Controller will continue to poll at a reduced rate
                 - The Controller buffers requests but cannot send to the Fireplace
     """
     BUSY = "BusyWaiting"
     READY = "Ready"
+    NON_RESPONSIVE = "NonResponsive"
     DISCONNECTED = "Disconnected"
 
 class Fan(Enum):
@@ -128,18 +132,18 @@ class Controller:
         """
         while not self._discovery.loop.is_closed():
 
-            if self._state == ControllerState.DISCONNECTED:
-                time_now = time()
-                if time_now - self._state_changed < RETRY_TIMEOUT:
-                    sleep_time = RETRY_INTERVAL
-                else:
-                    sleep_time = RETRY_DISCONNECTED_INTERVAL
-                    self._discovery.controller_disconnected(self, asyncio.TimeoutError)
-            else:                    
+            if self._state == ControllerState.READY:
                 sleep_time = REFRESH_INTERVAL
+            elif self._state == ControllerState.DISCONNECTED:
+                sleep_time = DISCONNECTED_INTERVAL
+            elif self._state == ControllerState.BUSY:
+                sleep_time = ON_OFF_BUSY_WAIT_TIME
+            else:
+                sleep_time = RETRY_INTERVAL
 
             await asyncio.sleep(sleep_time)
             await self._refresh_system()
+
             _LOG.debug("Polling unit %s at address %s (current state is %s)",
                 self._system_settings[DictEntries.DEVICE_UID],
                 self._system_settings[DictEntries.IP_ADDRESS],
@@ -229,15 +233,17 @@ class Controller:
             If we get status, and we were previously Disconnected or Busy,
             sync up the fireplace to our internal system settings.
         """
+        prior_state = self._state
         response = await self._request_status()
-        if response.response_id == ResponseID.STATUS:
+        if (response is not None) and (response.response_id == ResponseID.STATUS):
             # We have a valid response - the controller is communicating
 
             # These values are readonly, so copy them in any case
             self._system_settings[DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
             self._system_settings[DictEntries.CURRENT_TEMP]   = response.current_temp
 
-            if self._state == ControllerState.READY:
+            if prior_state == ControllerState.READY:
+
                 # Normal operation, update our internal values
                 self._system_settings[DictEntries.DESIRED_TEMP]   = response.desired_temp
                 if response.fan_boost_is_on:
@@ -251,14 +257,13 @@ class Controller:
                 if notify:
                     self._discovery.controller_update(self)
 
-            if (self._state == ControllerState.DISCONNECTED) \
-                or (self._state == ControllerState.BUSY \
-                    and time() - self._state_changed > ON_OFF_BUSY_WAIT_TIME):
-                
-
+            elif (prior_state in [ControllerState.NON_RESPONSIVE, ControllerState.DISCONNECTED]) \
+                    or (prior_state == ControllerState.BUSY \
+                        and time() - self._state_changed > ON_OFF_BUSY_WAIT_TIME):
 
                 # We have come back to READY state.
                 # We need to try to sync the fireplace settings with our internal copies
+
                 if response.desired_temp != self._system_settings[DictEntries.DESIRED_TEMP]:
                     self._set_system_state(DictEntries.DESIRED_TEMP, self._system_settings[DictEntries.DESIRED_TEMP], sync=True)
 
@@ -273,21 +278,29 @@ class Controller:
                 else:
                     self._state = ControllerState.READY
                 self._state_changed = time()
+                if prior_state == ControllerState.DISCONNECTED:
+                    self._discovery.controller_reconnected(self)                    
 
-                # Once all those commands have been processed, now we refresh the status (recursive call but should be safe)
-                await self._refresh_system()
-
-        elif self._state != ControllerState.DISCONNECTED:
-            # This is first time the fireplace has not responded to our UDP message...
-            self._state = ControllerState.DISCONNECTED
-            self._state_changed = time()
+        else:
+            # No / invalid response, need to check if we need to change state
+            if prior_state in [ControllerState.READY, ControllerState.BUSY]:
+                self._state = ControllerState.NON_RESPONSIVE
+                self._state_changed = time()
+            elif (prior_state == [ControllerState.NON_RESPONSIVE]) \
+                    and (time() - self._state_changed > RETRY_TIMEOUT):
+                self._state = ControllerState.DISCONNECTED
+                self._state_changed = time()
+                self._discovery.controller_disconnected(self, TimeoutError)
 
     async def _request_status(self) -> FireplaceMessage:
         try:
             async with self._sending_lock:
                 responses = await self._datagram.send_command(CommandID.STATUS_PLEASE)
-            this_response = next(iter(responses)) # only expecting one
-            return responses[this_response]
+            if responses is None:
+                return None
+            else:
+                this_response = next(iter(responses)) # only expecting one
+                return responses[this_response]
         except (TimeoutError) as ex:
             return None
 

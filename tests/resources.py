@@ -7,6 +7,7 @@ def fireplaces():
         1111: {
             "IPAddress": "8.8.8.8",
             "DeviceUId": 1111,
+            "ControllerState": "Ready",
             "HasNewTimers": False,
             "FireIsOn": False,
             "FanMode": "Auto",
@@ -16,6 +17,7 @@ def fireplaces():
         2222: {
             "IPAddress": "8.8.4.4",
             "DeviceUId": 2222,
+            "ControllerState": "Ready",
             "HasNewTimers": False,
             "FireIsOn": True,
             "FanMode": "FanBoost",
@@ -25,6 +27,7 @@ def fireplaces():
         33333: {
             "IPAddress": "8.8.8.4",
             "DeviceUId": 33333,
+            "ControllerState": "Ready",
             "HasNewTimers": True,
             "FireIsOn": True,
             "FanMode": "FlameEffect",
