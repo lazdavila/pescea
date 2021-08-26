@@ -3,61 +3,17 @@ import asyncio
 from typing import Any
 from pescea.message import MAX_SET_TEMP, MIN_SET_TEMP
 import pytest
+from pytest import mark
 
 from pescea.message import MIN_SET_TEMP, MAX_SET_TEMP, FireplaceMessage, CommandID, expected_response
 from pescea.datagram import MultipleResponses
 from pescea.controller import Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
 
-class MockFireplaceInstance():
-    def __init__(self, addr):
-        self.is_on = False
-        self.flame_effect = False
-        self.fan_boost = False
-        self.desired_temp = False
-        self.current_temp = False
-        self.ip = addr
-        self.force_no_response = False
-
-test_fireplace = MockFireplaceInstance('192.168.0.111')    
-
 async def patched_send_command(self, command: CommandID, data: Any = None, broadcast: bool = False) -> MultipleResponses:
 
-    if test_fireplace.force_no_response:
-        return None
 
-    responses = dict()   # type: MultipleResponses
-
-    await asyncio.sleep(0.1)
-    if command == CommandID.FAN_BOOST_OFF:
-        test_fireplace.fan_boost = False
-    elif command == CommandID.FAN_BOOST_ON:
-        test_fireplace.fan_boost = True
-    elif command == CommandID.FLAME_EFFECT_OFF:
-        test_fireplace.flame_effect = False
-    elif command == CommandID.FLAME_EFFECT_ON:
-        test_fireplace.flame_effect= True    
-    elif command == CommandID.POWER_ON:
-        test_fireplace.is_on = True
-        test_fireplace.current_temp = MAX_SET_TEMP
-    elif command == CommandID.POWER_OFF:
-        test_fireplace.is_on = False
-        test_fireplace.current_temp = MIN_SET_TEMP    
-    elif command == CommandID.NEW_SET_TEMP:
-        test_fireplace.desired_temp = data
-
-    responses[test_fireplace.ip] = FireplaceMessage(
-                                        incoming =FireplaceMessage.mock_response(
-                                                    expected_response(command),
-                                                    fire_on= test_fireplace.is_on,
-                                                    fan_boost_on=test_fireplace.fan_boost,
-                                                    effect_on=test_fireplace.flame_effect,
-                                                    desired_temp=test_fireplace.desired_temp,
-                                                    current_temp=test_fireplace.current_temp))
-
-    return responses
-
-@pytest.mark.asyncio
+@mark.asyncio
 async def test_controller_basics(mocker):
 
     discovery = DiscoveryService()
@@ -115,7 +71,7 @@ async def test_controller_basics(mocker):
 
     assert controller.current_temp is not None
 
-@pytest.mark.asyncio
+@mark.asyncio
 async def test_controller_change_address(mocker):
 
     discovery = DiscoveryService()
@@ -145,7 +101,7 @@ async def test_controller_change_address(mocker):
     await asyncio.sleep(0.2)
     assert controller.state == ControllerState.READY
     
-@pytest.mark.asyncio
+@mark.asyncio
 async def test_controller_poll(mocker):
 
     discovery = DiscoveryService()
@@ -185,7 +141,7 @@ async def test_controller_poll(mocker):
     assert not controller.is_on
 
         
-@pytest.mark.asyncio
+@mark.asyncio
 async def test_controller_disconnect_reconnect(mocker):
 
     discovery = DiscoveryService()
