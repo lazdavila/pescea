@@ -1,69 +1,171 @@
 import asyncio
 
-from asyncio import AbstractEventLoop
-from asynctest.mock import Mock
-from copy import deepcopy
-from pytest import fixture
-from typing import Any, Dict, List, Tuple
+from asyncio import Event
+from asyncio.transports import DatagramTransport
 
-# Pescea imports
-from pescea.discovery import DiscoveryService
-from pescea.controller import Controller
-from pescea.message import CommandID
+from pescea.datagram import REQUEST_TIMEOUT, MultipleResponses
+from pescea.message import MIN_SET_TEMP, FireplaceMessage, CommandID, ResponseID, expected_response
 
-class MockController(Controller):
+from .resources import test_fireplaces
 
-    def __init__(self, discovery, device_uid: str,
-                 device_ip: str) -> None:
+fireplaces = test_fireplaces()
 
-        super().__init__(discovery, device_uid, device_ip)
-        from .resources import fireplaces
-        self.resources = deepcopy(fireplaces[device_uid])  # type: Dict[str,Any]
-        self.sent = []  # type: List[Tuple[str,Any]]
-        self.connected = True
+class PatchedDatagramTransport(DatagramTransport):
+    """ Sets up a patched version of DataTransport used to simulate comms to a fireplace.
 
-    async def _get_resource(self, resource: str):
-        """Mock out the network IO for _get_resource."""
-        if self.connected:
-            result = self.resources.get(resource)
-            if result:
-                return deepcopy(result)
-        raise ConnectionError(
-            "Mock resource '{}' not available".format(resource))
+        Implements sendto and close part of the Datagram Transport.
+    
+        Simulated responses are generated here, but provided via sends_comms below
+    """
+    def __init__(self):
+        self.command = None
+        self.uid = None
+        self.responses = []
+        self.closed = False
+        self.event = Event()
 
-    async def send_command(self, command: CommandID, data: Any):
-        """Mock out the network IO for send_command."""
-        if self.connected:
-            self.sent.append((command, data))
+    def sendto(self, data, addr=None):
+        if self.closed:
+            return
 
-    async def change_system_state(self, state: str, value: Any) -> None:
-        self.resources[state] = value
-        # TODO: Force status refresh
-        await asyncio.sleep(0)
+        # data is bytearray
+        self.command = FireplaceMessage( incoming= data)
 
-class MockDiscoveryService(DiscoveryService):
+        # Update internal state
+        if self.command.command_id == CommandID.FAN_BOOST_OFF:
+            fireplaces[self.uid]["FanBoost"] = False
+        elif self.command.command_id == CommandID.FAN_BOOST_ON:
+            fireplaces[self.uid]["FanBoost"] = True
+        elif self.command.command_id == CommandID.FLAME_EFFECT_OFF:
+            fireplaces[self.uid]["FlameEffect"] = False
+        elif self.command.command_id == CommandID.FLAME_EFFECT_ON:
+            fireplaces[self.uid]["FlameEffect"] = True    
+        elif self.command.command_id == CommandID.POWER_ON:
+            fireplaces[self.uid]["FireIsOn"] = True
+        elif self.command.command_id == CommandID.POWER_OFF:
+            fireplaces[self.uid]["FireIsOn"] = False
+        elif self.command.command_id == CommandID.NEW_SET_TEMP:
+            fireplaces[self.uid]["DesiredTemp"] = int(self.command.desired_temp)
+            fireplaces[self.uid]["CurrentTemp"] = int((self.command.desired_temp + fireplaces[self.uid]["CurrentTemp"]) / 2.0)
 
-    def __init__(self, loop: AbstractEventLoop = None) -> None:
-        super().__init__(loop=loop)
-        self._send_broadcasts = Mock()  # type: ignore
-        self.datagram_received = Mock()  # type: ignore
-        self.connected = True
+        # Prepare responses
+        if self.command.command_id == CommandID.SEARCH_FOR_FIRES:
+            for uid in fireplaces:
+                self.responses.append((FireplaceMessage.mock_response(response_id= ResponseID.I_AM_A_FIRE, uid=uid), fireplaces[uid]["IPAddress"]))
 
-    def _create_controller(self, device_uid, device_ip):
-        return MockController(self, device_uid=device_uid, device_ip=device_ip)
+        elif self.command.command_id == CommandID.STATUS_PLEASE:
+            self.responses.append((
+                FireplaceMessage.mock_response(
+                    response_id= ResponseID.STATUS,
+                    uid= self.uid,
+                    has_new_timers= fireplaces[self.uid]["HasNewTimers"],
+                    fire_on=fireplaces[self.uid]["FireIsOn"], 
+                    fan_boost_on=fireplaces[self.uid]["FanBoost"], 
+                    effect_on=fireplaces[self.uid]["FlameEffect"], 
+                    desired_temp=int(fireplaces[self.uid]["DesiredTemp"]),
+                    current_temp=int(fireplaces[self.uid]["CurrentTemp"])), 
+                fireplaces[self.uid]["IPAddress"]
+            ))
 
-@fixture
-def service(event_loop):
-    """Fixture to provide a test instance of HASS."""
-    service = MockDiscoveryService(event_loop)
-    event_loop.run_until_complete(service.start_discovery())
+        else:
+            self.responses.append((FireplaceMessage.mock_response(expected_response(self.command.command_id)), fireplaces[self.uid]["IPAddress"]))
 
-    # service._process_datagram(
-    #     b'ASPort_12107,Mac_000000001,IP_8.8.8.8,Escea',
-    #     ('8.8.8.8', 12107))
-    event_loop.run_until_complete(asyncio.sleep(0.1))
+        # Notify data is ready to collect
+        self.event.set()
 
-    yield service
+    def close(self):
+        self.closed = True
 
-    event_loop.run_until_complete(service.close())
+    @property
+    def next_response(self):
+        if self.closed or len(self.responses) == 0 \
+            or (self.uid != 0 and not fireplaces[self.uid]["Responsive"]):
+            return None, None
 
+        response = self.responses.pop(0)
+        return response[0], response[1]
+
+async def simulate_comms(transport, protocol, broadcast : bool = False, raise_exception : Exception = None):
+    """ Handles sending a reply based on command received
+    
+        Implements the connection_made, datagram_received, error_received
+        and connection_lost methods.
+        
+        The other protocol methods are implemented in PatchedDatagramProtocol above
+    """
+
+    # Have we been asked to generate an exception?
+    if raise_exception is not None:
+        if raise_exception is TimeoutError:
+           await asyncio.sleep(2*REQUEST_TIMEOUT) # exceed the timeout in request
+        else:
+            protocol.error_received(raise_exception)
+
+    else:
+        protocol.connection_made(transport)
+
+        await transport.event.wait()
+        transport.event.clear()
+        next_response, addr = transport.next_response
+
+        if next_response is not None:
+            protocol.datagram_received(next_response, addr)
+
+            if broadcast:
+                while True:
+                    next_response, addr = transport.next_response
+                    if next_response is None:
+                        break
+                    else:
+                        protocol.datagram_received(next_response, addr)
+
+    await asyncio.sleep(0.01)
+    protocol.connection_lost(None)
+
+async def simulate_comms_patchable(transport, protocol, broadcast):
+    """ Generic pattern, overwritten by tests to generate different results"""
+    await simulate_comms(transport, protocol, broadcast)
+
+async def simulate_comms_timeout_error(transport, protocol, broadcast):
+    await simulate_comms(transport, protocol, broadcast, raise_exception = TimeoutError)
+
+async def simulate_comms_connection_error(transport, protocol, broadcast):
+    await simulate_comms(transport, protocol, broadcast, raise_exception = ConnectionError)
+
+async def patched_create_datagram_endpoint(
+        self, protocol_factory,
+        local_addr=None, remote_addr=None,
+        family=0, proto=0, flags=0,
+        reuse_address=None, reuse_port=None,
+        allow_broadcast=None, sock=None):
+    """A coroutine which creates a datagram endpoint.
+
+    This method will try to establish the endpoint in the background.
+    When successful, the coroutine returns a (transport, protocol) pair.
+
+    protocol_factory must be a callable returning a protocol instance.
+
+    socket family AF_INET, socket.AF_INET6 or socket.AF_UNIX depending on
+    host (or family if specified), socket type SOCK_DGRAM.
+
+    allow_broadcast tells the kernel to allow this endpoint to send
+    messages to the broadcast address.
+    """
+    assert remote_addr is not None
+
+    transport = PatchedDatagramTransport()
+    if allow_broadcast == True:
+        transport.uid = 0
+    else:
+        for uid in fireplaces:
+            if fireplaces[uid]["IPAddress"] == remote_addr[0]:
+                transport.uid = uid
+                break
+
+    protocol = protocol_factory()
+
+    print("Datagram endpoint remote_addr created: "+str(remote_addr))
+
+    asyncio.create_task(simulate_comms_patchable(transport, protocol, allow_broadcast))
+
+    return transport, protocol

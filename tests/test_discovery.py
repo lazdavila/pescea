@@ -9,7 +9,9 @@ from pescea.message import FireplaceMessage
 
 from pytest import raises
 
-from .resources import fireplaces
+from .resources import test_fireplaces
+
+fireplaces = test_fireplaces()
 
 @pytest.mark.asyncio
 @patch.object(DiscoveryService, '_send_broadcast')
