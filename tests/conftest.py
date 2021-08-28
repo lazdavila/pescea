@@ -3,9 +3,10 @@ import logging
 
 from asyncio import Event, sleep
 from asyncio.transports import DatagramTransport
+from async_timeout import timeout
 
-from pescea.datagram import REQUEST_TIMEOUT, MultipleResponses
-from pescea.message import MIN_SET_TEMP, FireplaceMessage, CommandID, ResponseID, expected_response
+from pescea.datagram import REQUEST_TIMEOUT
+from pescea.message import FireplaceMessage, CommandID, ResponseID, expected_response
 
 from .resources import test_fireplaces
 
@@ -122,7 +123,6 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
                     else:
                         protocol.datagram_received(next_response, addr)
 
-    await sleep(0.01)
     protocol.connection_lost(None)
 
 async def simulate_comms_patchable(transport, protocol, broadcast):
@@ -133,7 +133,8 @@ async def simulate_comms_timeout_error(transport, protocol, broadcast):
     await simulate_comms(transport, protocol, broadcast, raise_exception = TimeoutError)
 
 async def simulate_comms_connection_error(transport, protocol, broadcast):
-    await simulate_comms(transport, protocol, broadcast, raise_exception = ConnectionError)
+    async with timeout(3*REQUEST_TIMEOUT):
+        await simulate_comms(transport, protocol, broadcast, raise_exception = ConnectionError)
 
 async def patched_create_datagram_endpoint(
         self, protocol_factory,

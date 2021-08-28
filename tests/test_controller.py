@@ -1,9 +1,10 @@
 """Test Escea controller module functionality """
 import pytest
 from pytest import mark
+import asyncio
 from asyncio import sleep
 
-from pescea.controller import Fan, ControllerState, Controller
+from pescea.controller import DISCONNECTED_INTERVAL, REFRESH_INTERVAL, REQUEST_TIMEOUT, Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
 
 from .conftest import fireplaces, patched_create_datagram_endpoint
@@ -67,9 +68,11 @@ async def test_controller_basics(mocker):
 
     assert controller.current_temp is not None
 
-    # clean shutdown
+    # Teardown:
     controller.close()
     await sleep(0.2)
+    asyncio.gather(*asyncio.all_tasks())
+
 
 @mark.asyncio
 async def test_controller_change_address(mocker):
@@ -107,9 +110,10 @@ async def test_controller_change_address(mocker):
     assert controller.state == ControllerState.READY
     assert controller.device_ip == new_ip
 
-    # clean shutdown
+    # Teardown:
     controller.close()
     await sleep(0.2)
+    asyncio.gather(*asyncio.all_tasks())
 
 @mark.asyncio
 async def test_controller_poll(mocker):
@@ -152,14 +156,15 @@ async def test_controller_poll(mocker):
     # Change in the backend what our more fireplace returns
     fireplaces[device_uid]["FireIsOn"] = False
 
-    await sleep(0.5)
+    await sleep(2.0)
     # Check the poll command has read the changed status
     assert not controller.is_on
 
-    # clean shutdown
+    # Teardown:
     controller.close()
     await sleep(0.2)
-        
+    asyncio.gather(*asyncio.all_tasks())
+
 @mark.asyncio
 async def test_controller_disconnect_reconnect(mocker):
 
@@ -174,6 +179,7 @@ async def test_controller_disconnect_reconnect(mocker):
     mocker.patch('pescea.controller.RETRY_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.2)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.3)
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
@@ -189,7 +195,7 @@ async def test_controller_disconnect_reconnect(mocker):
     await sleep(0.1)
     assert controller.state == ControllerState.NON_RESPONSIVE
 
-    await sleep(0.2)
+    await sleep(0.3)
     assert controller.state == ControllerState.DISCONNECTED
 
     new_ip = fireplaces[list(fireplaces.keys())[-1]]["IPAddress"]
@@ -197,10 +203,11 @@ async def test_controller_disconnect_reconnect(mocker):
     assert controller.device_ip == new_ip
 
     fireplaces[device_uid]["Responsive"] = True
-    await sleep(0.4)
+    await sleep(0.6)
     
     assert controller.state == ControllerState.READY
 
     # clean shutdown
     controller.close()
-    await sleep(0.2)
+    await sleep(0.6)
+    asyncio.gather(*asyncio.all_tasks())

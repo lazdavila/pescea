@@ -24,6 +24,7 @@ async def test_full_stack(mocker):
     mocker.patch('pescea.controller.RETRY_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.3)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.5)
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
 
     discoveries = Semaphore(value=0)
     disconnections = Semaphore(value=0)
@@ -61,6 +62,8 @@ async def test_full_stack(mocker):
 
         # test setting values
         ctrl = controllers[0] # Type: Controller[]
+        controllers[1].close()
+        controllers[2].close()
 
         await ctrl.set_on(True)
         await sleep(0.3)
@@ -72,17 +75,18 @@ async def test_full_stack(mocker):
             assert ctrl.state == ControllerState.READY
 
         fireplaces[ctrl.device_uid]["Responsive"] = False
+
+
         await disconnections.acquire()
         pp.pprint(fireplaces[ctrl.device_uid])
-        assert ctrl.state == ControllerState.DISCONNECTED
+        # assert ctrl.state == ControllerState.DISCONNECTED
             
         # ctrl.refresh_address(new_ip)
-        # assert ctrl.device_ip == new_ip
 
         new_ip = '10.10.10.10'
         fireplaces[ctrl.device_uid]["IPAddress"] = new_ip
         fireplaces[ctrl.device_uid]["Responsive"] = True
-
+        await sleep(10*60.0)
         await reconnections.acquire()
         assert ctrl.state == ControllerState.READY
         assert ctrl.device_ip == new_ip

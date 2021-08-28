@@ -1,9 +1,11 @@
 """Test UDP datagram functionality """
 import asyncio
+
+
 import pytest
 from pytest import mark
  
-from pescea.datagram import FireplaceDatagram
+from pescea.datagram import REQUEST_TIMEOUT, FireplaceDatagram
 from pescea.message import CommandID
 
 from .conftest import fireplaces, \
@@ -29,6 +31,9 @@ async def test_search_for_fires(mocker):
         serial_number = responses[addr].serial_number
         assert fireplaces[serial_number]["IPAddress"] == addr
 
+    # Teardown:
+    asyncio.gather(*asyncio.all_tasks())
+
 @mark.asyncio
 async def test_get_status(mocker):
 
@@ -48,6 +53,9 @@ async def test_get_status(mocker):
     assert responses[fireplaces[uid]["IPAddress"]].fire_is_on == fireplaces[uid]["FireIsOn"]
     assert responses[fireplaces[uid]["IPAddress"]].desired_temp == fireplaces[uid]["DesiredTemp"]
 
+    # Teardown:
+    asyncio.gather(*asyncio.all_tasks())
+
 @mark.asyncio
 async def test_timeout_error(mocker):
 
@@ -60,6 +68,7 @@ async def test_timeout_error(mocker):
         'tests.conftest.simulate_comms_patchable',
         simulate_comms_timeout_error
     )
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
 
     event_loop = asyncio.get_event_loop()
     uid = list(fireplaces.keys())[0]
@@ -69,9 +78,11 @@ async def test_timeout_error(mocker):
 
     with pytest.raises(asyncio.TimeoutError):
         responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
-    event_loop.stop()
 
- 
+     # Teardown6
+    await asyncio.sleep(2*REQUEST_TIMEOUT)
+    asyncio.gather(*asyncio.all_tasks())
+
 @pytest.mark.asyncio
 async def test_connection_error(mocker):
 
@@ -93,3 +104,6 @@ async def test_connection_error(mocker):
 
     responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
     assert len(responses) == 0
+
+    # Teardown:
+    asyncio.gather(*asyncio.all_tasks())

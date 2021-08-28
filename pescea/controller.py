@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import sys
 
 from enum import Enum
 from typing import Dict, Union, Optional
@@ -140,7 +141,11 @@ class Controller:
         """
         while not self._closed:
 
-            await self._refresh_system()
+            try:
+                await self._refresh_system()
+            except:
+                exc = sys.exc_info()[0]
+                print("Unexpected error:", sys.exc_info()[0])
 
             _LOG.debug("Polling unit %s at address %s (current state is %s)",
                 self._system_settings[DictEntries.DEVICE_UID],
@@ -318,7 +323,8 @@ class Controller:
                 self._state = ControllerState.NON_RESPONSIVE
             else:
                 self._state = ControllerState.DISCONNECTED
-                self._discovery.controller_disconnected(self, TimeoutError)
+                if prior_state != ControllerState.DISCONNECTED:
+                    self._discovery.controller_disconnected(self, TimeoutError)
 
     async def _request_status(self) -> FireplaceMessage:
         try:
