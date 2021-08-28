@@ -194,7 +194,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
             "Connection to controller lost: id=%s ip=%s",
             ctrl.device_uid, ctrl.device_ip)
         self._disconnected.add(ctrl.device_uid)
-        self.loop.create_task(self._rescan())
+        self.create_task(self._rescan())
         for listener in self._listeners:
             with LogExceptions("controller_disconnected"):
                 listener.controller_disconnected(ctrl, ex)
@@ -260,7 +260,10 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     # Closing the connection
     async def close(self) -> None:
         _LOG.info("Close called on discovery service.")
-        await asyncio.wait(self._tasks)
+        for _, ctrl in self._controllers.items():
+            ctrl.close()
+        if len(self._tasks) > 0:
+            await asyncio.wait(self._tasks)
 
     def error_received(self, exc):
         _LOG.warning(
@@ -282,7 +285,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                 coro, repr(ex))
 
     def _discovery_received(self, data: FireplaceMessage, addr):
-        device_ip, _ = addr
+        device_ip = addr
         device_uid = data.serial_number
 
         if device_uid not in self._controllers:
@@ -311,23 +314,6 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     def _create_controller(self, device_uid, device_ip):
         return Controller(
             self, device_uid=device_uid, device_ip=device_ip)
-
-    """ Following methods are for test purposes only """
-
-    def dump(self, indent: str = '') -> None:
-        tab = "    "
-        print(indent + "DiscoveryService:")
-        print(indent + tab + "Controllers: {0}".format(self._controllers))
-        print(indent + tab + "Disconnected: {0}".format(self._disconnected))
-        print(indent + tab + "Listeners: {0}".format(self._listeners))
-        if self._close_task is not None:
-            print(indent + tab + "Close Task: {0}".format(self._close_task))
-        print(indent + tab + "Broadcast IP: {0}".format(self._broadcast_ip))
-        self._datagram.dump(indent=indent + tab)
-        print(indent + tab +
-              "Scan Condition: {0}".format(self._scan_condition))
-        print(indent + tab + "Tasks: {0}".format(self._tasks))
-
 
 def discovery(*listeners: Listener,
               loop: AbstractEventLoop = None,

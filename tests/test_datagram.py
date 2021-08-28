@@ -2,11 +2,9 @@
 import asyncio
 import pytest
 from pytest import mark
-
-from asyncio.transports import DatagramTransport
  
 from pescea.datagram import FireplaceDatagram
-from pescea.message import MIN_SET_TEMP, CommandID
+from pescea.message import CommandID
 
 from .conftest import fireplaces, \
                       simulate_comms_timeout_error, simulate_comms_connection_error, \

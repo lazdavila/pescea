@@ -302,8 +302,6 @@ class FireplaceMessage:
     def crc(self) -> int:
         return self._crc_sum
 
-
-
     @property
     def bytearray_(self) -> bytearray:
         return self._bytearray
@@ -381,46 +379,3 @@ class FireplaceMessage:
             message[MSG_OFFSET_CRC] = crc_sum
 
         return message
-
-    def dump(self, indent: str = '') -> None:
-        tab = "    "
-        print(indent + "FireplaceMessage:")
-        print(indent + tab +
-              "Byte array: " + self.bytearray_.hex())
-        print(indent + tab + "Structure:")
-        if self._is_command is not None:
-            if self._is_command:
-                print(indent + tab + tab +
-                      "Command ID: " + CommandID(self._id).name())
-            else:
-                print(indent + tab + tab +
-                      "Response ID: " + ResponseID(self._id).name())
-
-        if self._has_new_timers is not None:
-            print(indent + tab + tab +
-                  "Has new timers: {0}".format(self._has_new_timers))
-
-        if self._fan_boost_on is not None:
-            print(indent + tab + tab +
-                  "Fan Boost on: {0}".format(self._fan_boost_on))
-
-        if self._effect_on is not None:
-            print(indent + tab + tab +
-                  "Flame Effect on: {0}".format(self._effect_on))
-
-        if self._desired_temp is not None:
-            print(indent + tab + tab +
-                  "Desired Temp: {0}".format(self._desired_temp))
-
-        if self._current_temp is not None:
-            print(indent + tab + tab +
-                  "Current Temp: {0}".format(self._current_temp))
-
-        if self._serial is not None:
-            print(indent + tab + tab + "Device UID: {0}".format(self._serial))
-
-        if self._pin is not None:
-            print(indent + tab + tab + "Device PIN: {0}".format(self._pin))
-
-        if self._crc_sum is not None:
-            print(indent + tab + tab + "CRC: {0}".format(self._crc_sum))

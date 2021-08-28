@@ -1,6 +1,7 @@
 import asyncio
+import logging
 
-from asyncio import Event
+from asyncio import Event, sleep
 from asyncio.transports import DatagramTransport
 
 from pescea.datagram import REQUEST_TIMEOUT, MultipleResponses
@@ -9,6 +10,8 @@ from pescea.message import MIN_SET_TEMP, FireplaceMessage, CommandID, ResponseID
 from .resources import test_fireplaces
 
 fireplaces = test_fireplaces()
+
+_LOG = logging.getLogger('tests.conftest')  # type: Logger
 
 class PatchedDatagramTransport(DatagramTransport):
     """ Sets up a patched version of DataTransport used to simulate comms to a fireplace.
@@ -97,7 +100,7 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
     # Have we been asked to generate an exception?
     if raise_exception is not None:
         if raise_exception is TimeoutError:
-           await asyncio.sleep(2*REQUEST_TIMEOUT) # exceed the timeout in request
+           await sleep(2*REQUEST_TIMEOUT) # exceed the timeout in request
         else:
             protocol.error_received(raise_exception)
 
@@ -119,7 +122,7 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
                     else:
                         protocol.datagram_received(next_response, addr)
 
-    await asyncio.sleep(0.01)
+    await sleep(0.01)
     protocol.connection_lost(None)
 
 async def simulate_comms_patchable(transport, protocol, broadcast):
@@ -164,7 +167,8 @@ async def patched_create_datagram_endpoint(
 
     protocol = protocol_factory()
 
-    print("Datagram endpoint remote_addr created: "+str(remote_addr))
+    _LOG.debug(
+        "Datagram endpoint remote_addr created: %s",str(remote_addr))
 
     asyncio.create_task(simulate_comms_patchable(transport, protocol, allow_broadcast))
 

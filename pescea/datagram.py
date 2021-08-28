@@ -118,15 +118,3 @@ class FireplaceDatagram:
 
         except (OSError, TimeoutError) as ex:
             raise ConnectionError("Unable to send UDP") from ex
-
-    """ The rest of this module is to support testing """
-
-    def dump(self, indent: str = '') -> None:
-        tab = "    "
-        print(indent + "FireplaceDatagram:")
-        print(indent + tab + "Device IP: {0}".format(self._ip))
-        print(indent + tab + "Event Loop: {0}".format(self._event_loop))
-        if self._fail_exception is not None:
-            print(indent + tab +
-                  "Fail Exception: {0}".format(self._fail_exception))
-        print(indent + tab + "Sending Lock: {0}".format(self._sending_lock))

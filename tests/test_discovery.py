@@ -1,229 +1,76 @@
+"""Test Escea discovery service module functionality """
+import asyncio
 import pytest
+from pytest import mark
 
-from asynctest.mock import patch
-from asyncio import sleep
-
-from pescea import discovery, Controller, Listener
+from pescea.controller import Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
-from pescea.message import FireplaceMessage
 
-from pytest import raises
+from .conftest import fireplaces, patched_create_datagram_endpoint
 
-from .resources import test_fireplaces
+@mark.asyncio
+async def test_service_basics(mocker):
 
-fireplaces = test_fireplaces()
+    mocker.patch(
+        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
+        patched_create_datagram_endpoint
+    )
 
-@pytest.mark.asyncio
-@patch.object(DiscoveryService, '_send_broadcast')
-async def test_broadcasts_sent(send):
-    async with discovery():
-        assert send.called
+    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
+    mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
+    mocker.patch('pescea.controller.RETRY_INTERVAL', 0.1)
+    mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.3)
+    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.5)
 
+    # grab service
 
-@pytest.mark.asyncio
-@patch.object(DiscoveryService, '_send_broadcast')
-async def test_rescan(send):
-    async with discovery() as service:
-        assert not service.is_closed
-        assert send.call_count == 1
+    # check has searched for fireplaces
 
-        await service.rescan()
-        await sleep(0)
-        assert send.call_count == 2
+    # check has three fireplaces
 
-    assert service.is_closed
+    discovery = DiscoveryService()
+    device_uid = list(fireplaces.keys())[0]
+    device_ip = fireplaces[device_uid]["IPAddress"]
 
+    # Test steps:
+    controller = Controller(discovery, device_uid, device_ip)
+    await controller.initialize()
 
-@pytest.mark.asyncio
-async def test_fail_on_connect(event_loop, caplog):
-    from .conftest import MockDiscoveryService
+    assert controller.device_ip == device_ip
+    assert controller.device_uid == device_uid
+    assert controller.discovery == discovery
+    assert controller.state == ControllerState.READY
 
-    service = MockDiscoveryService(event_loop)
-    service.connected = False
 
-    async with service:
-        # TODO: Figure out how to stub this / how would it work now?
-        service._datagram.process_received(None, '1.1.1.1')
-        await sleep(0)
-        await sleep(0)
+async def test_controller_updates(mocker):
+    # grab service
 
-    assert len(caplog.messages) == 1
-    assert caplog.messages[0][:41] == \
-        "Can't connect to discovered server at IP "
-    assert not service.controllers
+    # attempt to control each controller
 
+    # shut down each controller
+    pass
 
-@pytest.mark.asyncio
-async def test_connection_lost(service, caplog):
-    service.connection_lost(IOError("Nonspecific"))
-    await sleep(0)
+async def test_no_controllers_found(mocker):
+    # grab service
 
-    assert len(caplog.messages) == 1
-    assert caplog.messages[0] == \
-        "Connection Lost unexpectedly: OSError('Nonspecific')"
+    # check has searched for fireplaces
 
-    assert service.is_closed
+    # check has three fireplaces
 
+    # attempt to control each controller
 
-@pytest.mark.asyncio
-async def test_discovery(service: DiscoveryService):
-    assert len(service.controllers) == len(fireplaces)
+    # shut down each controller
+    pass
 
-    for ctl_uid in list(fireplaces.keys()):
 
-        assert ctl_uid in service.controllers
-        controller = service.controllers[ctl_uid]  # type: Controller
+async def test_controller_disconnection(mocker):
+    # grab service
 
-        # Check system settings are update on init
-        assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
-        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == fireplaces[ctl_uid]["IPAddress"]
-        assert controller._system_settings[Controller.DictEntries.HAS_NEW_TIMERS] == fireplaces[ctl_uid]["HasNewTimers"]
-        assert controller._system_settings[Controller.DictEntries.FIRE_IS_ON] == fireplaces[ctl_uid]["FireIsOn"]
-        assert controller._system_settings[Controller.DictEntries.FAN_MODE] == fireplaces[ctl_uid]["FanMode"]
-        assert controller._system_settings[Controller.DictEntries.DESIRED_TEMP] == fireplaces[ctl_uid]["DesiredTemp"]
-        assert controller._system_settings[Controller.DictEntries.CURRENT_TEMP] == fireplaces[ctl_uid]["CurrentTemp"]
+    # check has searched for fireplaces
 
-        # check properties work
-        assert controller.device_ip == fireplaces[ctl_uid]["IPAddress"]
-        assert controller.device_uid == ctl_uid
-        assert controller.is_on == fireplaces[ctl_uid]["FireIsOn"]
-        assert controller.fan == fireplaces[ctl_uid]["FanMode"]
-        assert controller.desired_temp == fireplaces[ctl_uid]["DesiredTemp"]
-        assert controller.current_temp == fireplaces[ctl_uid]["CurrentTemp"]
-        assert controller.min_temp == FireplaceMessage.MIN_SET_TEMP
-        assert controller.max_temp == FireplaceMessage.MAX_SET_TEMP
+    # check has three fireplaces
 
-        # check the methods
+    # attempt to control each controller
 
-        await controller.set_on(not controller.is_on)
-        assert controller.is_on != fireplaces[ctl_uid]["FireIsOn"]
-
-        for fan_mode in Controller.Fan:
-            await controller.set_fan(fan_mode)
-            assert controller.fan == fan_mode
-
-        for desired_temp in range(int(controller.min_temp), int(controller.max_temp)):
-            await controller.set_desired_temp(float(desired_temp))
-            assert int(controller.desired_temp) == desired_temp
-
-        for test_addr in '1.1.1.1', '2.2.2.2', '3.3.3.3':
-            await controller._refresh_address(test_addr)
-            assert controller.device_ip == test_addr
-
-        # set settings back to test case values
-        await controller.set_on(fireplaces[ctl_uid]["FireIsOn"])
-        assert controller.is_on == fireplaces[ctl_uid]["FireIsOn"]
-
-        await controller.set_fan(fireplaces[ctl_uid]["FanMode"])
-        assert controller.fan == fireplaces[ctl_uid]["FanMode"]
-
-        await controller.set_desired_temp(fireplaces[ctl_uid]["DesiredTemp"])
-        assert controller.desired_temp == fireplaces[ctl_uid]["DesiredTemp"]
-
-        await controller._refresh_address(fireplaces[ctl_uid]["IPAddress"])
-        assert controller.device_ip == fireplaces[ctl_uid]["IPAddress"]
-
-
-@pytest.mark.asyncio
-async def test_ip_addr_change(service: DiscoveryService, caplog):
-    assert len(service.controllers) == len(fireplaces)
-
-    for ctl_uid in list(fireplaces.keys()):
-
-        assert ctl_uid in service.controllers
-        controller = service.controllers[ctl_uid]  # type: Controller
-
-        assert controller._system_settings[Controller.DictEntries.DEVICE_UID] == ctl_uid
-        assert controller._system_settings[Controller.DictEntries.IP_ADDRESS] == fireplaces[ctl_uid]["IPAddress"]
-
-        for test_addr in '1.1.1.1', '2.2.2.2', '3.3.3.3':
-
-            # TODO: How to patch response so the address is changed
-            service._datagram.process_received(FireplaceMessage.dummy_response(
-                FireplaceMessage.ResponseID.I_AM_A_FIRE, uid=ctl_uid), test_addr)
-            await sleep(0)
-
-            assert controller.device_ip == test_addr
-
-
-@pytest.mark.asyncio
-async def test_reconnect(service, caplog):
-    controller = service.controllers['000000001']  # type: Controller
-    assert controller.device_uid == '000000001'
-    assert controller.power_on == True
-
-    controller.connected = False
-
-    assert caplog.messages[0][:30] == \
-        "Connection to fireplace lost:"
-    assert not controller.sent
-
-    controller.connected = True
-    service._process_datagram(
-        b'ASPort_12107,Mac_000000001,0000011234',
-        ('8.8.8.8', 3300))
-
-    await sleep(0.1)
-
-    # Reconnect OK
-    assert caplog.messages[1][:23] == \
-        "Fireplace reconnected:"
-    await controller.power_on == True
-
-
-@pytest.mark.asyncio
-async def test_reconnect_listener(service):
-    controller = service.controllers['000000001']  # type: Controller
-
-    calls = []
-
-    class TestListener(Listener):
-        def controller_discovered(self, ctrl: Controller) -> None:
-            calls.append(('discovered', ctrl))
-
-        def controller_disconnected(
-                self, ctrl: Controller, ex: Exception) -> None:
-            calls.append(('disconnected', ctrl, ex))
-
-        def controller_reconnected(self, ctrl: Controller) -> None:
-            calls.append(('reconnected', ctrl))
-    listener = TestListener()
-
-    service.add_listener(listener)
-    await sleep(0)
-
-    assert len(calls) == 1
-    assert calls[-1] == ('discovered', controller)
-
-    controller.connected = False
-    with raises(ConnectionError):
-        await controller.set_mode(Controller.Mode.COOL)
-
-    assert len(calls) == 2
-    assert calls[-1][0:2] == ('disconnected', controller)
-
-    controller.connected = True
-    service._process_datagram(
-        b'ASPort_12107,Mac_000000001,IP_8.8.8.8,Escea,iLight,iDrate',
-        ('8.8.8.8', 12107))
-    await sleep(0.1)
-
-    assert len(calls) == 3
-    assert calls[-1] == ('reconnected', controller)
-
-    service._process_datagram(
-        b'ASPort_12107,Mac_000000002,IP_8.8.8.4,Escea,iLight,iDrate',
-        ('8.8.8.8', 12107))
-    await sleep(0.1)
-    controller2 = service.controllers['000000002']  # type: Controller
-
-    assert len(calls) == 4
-    assert calls[-1] == ('discovered', controller2)
-
-    service.remove_listener(listener)
-
-    controller.connected = False
-    with raises(ConnectionError):
-        await controller.set_mode(Controller.Mode.COOL)
-
-    assert len(calls) == 4
+    # shut down each controller
+    pass

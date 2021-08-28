@@ -456,16 +456,3 @@ class Controller:
         if state == DictEntries.FIRE_IS_ON:
             self._state = ControllerState.BUSY
             self._busy_end_time = time() + ON_OFF_BUSY_WAIT_TIME
-
-    """ The remaining methods are for test purposes only """
-
-    def dump(self, indent: str = '') -> None:
-        tab = "    "
-        print(indent + "Controller:")
-        print(indent + tab + "Discovery: {0}".format(self._discovery))
-        print(indent + tab + "Settings: {0}".format(self._system_settings))
-        print(indent + tab + "Initialised: {0}".format(self._initialised))
-        if self._fail_exception is not None:
-            print(indent + tab +
-                  "Fail Exception: {0}".format(self._fail_exception))
-        self._datagram.dump(indent=indent + tab)

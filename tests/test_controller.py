@@ -1,18 +1,12 @@
 """Test Escea controller module functionality """
-import asyncio
-from typing import Any
-from pescea.message import MAX_SET_TEMP, MIN_SET_TEMP
 import pytest
 from pytest import mark
+from asyncio import sleep
 
-from pescea.message import MIN_SET_TEMP, MAX_SET_TEMP, FireplaceMessage, CommandID, expected_response
-from pescea.datagram import MultipleResponses
 from pescea.controller import Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
 
-from .conftest import fireplaces, \
-                      simulate_comms_timeout_error, simulate_comms_connection_error, \
-                      patched_create_datagram_endpoint
+from .conftest import fireplaces, patched_create_datagram_endpoint
 
 @mark.asyncio
 async def test_controller_basics(mocker):
@@ -47,7 +41,7 @@ async def test_controller_basics(mocker):
         # Should still be BUSY waiting
         assert controller.state == ControllerState.BUSY
         assert controller.is_on #saved the setting
-        await asyncio.sleep(0.5)
+        await sleep(0.5)
         assert controller.state == ControllerState.READY
 
     assert controller.is_on
@@ -57,7 +51,7 @@ async def test_controller_basics(mocker):
     assert controller.state == ControllerState.BUSY
     assert not controller.is_on # saved the setting
 
-    await asyncio.sleep(0.5)
+    await sleep(0.5)
     assert controller.state == ControllerState.READY
     assert not controller.is_on
 
@@ -75,7 +69,7 @@ async def test_controller_basics(mocker):
 
     # clean shutdown
     controller.close()
-    await asyncio.sleep(0.2)
+    await sleep(0.2)
 
 @mark.asyncio
 async def test_controller_change_address(mocker):
@@ -109,13 +103,13 @@ async def test_controller_change_address(mocker):
     assert controller.device_ip == new_ip
 
     # Allow time to poll for status and check still get response
-    await asyncio.sleep(0.2)
+    await sleep(0.2)
     assert controller.state == ControllerState.READY
     assert controller.device_ip == new_ip
 
     # clean shutdown
     controller.close()
-    await asyncio.sleep(0.2)
+    await sleep(0.2)
 
 @mark.asyncio
 async def test_controller_poll(mocker):
@@ -150,7 +144,7 @@ async def test_controller_poll(mocker):
         # Should still be BUSY waiting
         assert controller.state == ControllerState.BUSY
         assert controller.is_on # Saved, but not yet committed
-        await asyncio.sleep(0.5)
+        await sleep(0.5)
         assert controller.state == ControllerState.READY
 
     assert controller.is_on
@@ -158,13 +152,13 @@ async def test_controller_poll(mocker):
     # Change in the backend what our more fireplace returns
     fireplaces[device_uid]["FireIsOn"] = False
 
-    await asyncio.sleep(0.5)
+    await sleep(0.5)
     # Check the poll command has read the changed status
     assert not controller.is_on
 
     # clean shutdown
     controller.close()
-    await asyncio.sleep(0.2)
+    await sleep(0.2)
         
 @mark.asyncio
 async def test_controller_disconnect_reconnect(mocker):
@@ -192,10 +186,10 @@ async def test_controller_disconnect_reconnect(mocker):
 
     fireplaces[device_uid]["Responsive"] = False
 
-    await asyncio.sleep(0.1)
+    await sleep(0.1)
     assert controller.state == ControllerState.NON_RESPONSIVE
 
-    await asyncio.sleep(0.2)
+    await sleep(0.2)
     assert controller.state == ControllerState.DISCONNECTED
 
     new_ip = fireplaces[list(fireplaces.keys())[-1]]["IPAddress"]
@@ -203,10 +197,10 @@ async def test_controller_disconnect_reconnect(mocker):
     assert controller.device_ip == new_ip
 
     fireplaces[device_uid]["Responsive"] = True
-    await asyncio.sleep(0.4)
+    await sleep(0.4)
     
     assert controller.state == ControllerState.READY
 
     # clean shutdown
     controller.close()
-    await asyncio.sleep(0.2)
+    await sleep(0.2)
