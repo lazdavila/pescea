@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import sys
 
 from asyncio import  Future, DatagramTransport
 from asyncio.base_events import BaseEventLoop
@@ -15,7 +16,7 @@ from typing import Any, Dict
 from .message import FireplaceMessage, CommandID, expected_response
 
 import logging
-_LOG = logging.getLogger("pescea.datagram")
+_LOG = logging.getLogger('pescea.datagram')
 
 # Port to use for discovery and integration
 CONTROLLER_PORT = 3300
@@ -60,6 +61,8 @@ class FireplaceDatagram:
         """ Send command via UDP
 
             Returns received responses and IP addresses they come from
+
+            Raises ConnectionError if unable to send command
         """
         loop = self._event_loop
         on_complete = loop.create_future()
@@ -83,7 +86,7 @@ class FireplaceDatagram:
                 response = FireplaceMessage(incoming=data)
                 if response.response_id != expected_response(self._message.command_id):
                     _LOG.error(
-                        "Message response id: %s does not match command id: %s",
+                        'Message response id: %s does not match command id: %s',
                         response.response_id, self._message.command_id)
                 responses[addr] = response
                 if command != CommandID.SEARCH_FOR_FIRES:
@@ -91,7 +94,7 @@ class FireplaceDatagram:
 
             def error_received(self, exc):
                 _LOG.warning(
-                    "Error sending command=%s failed with exception: %s",
+                    'Error sending command=%s failed with exception: %s',
                     self._message.command_id, str(exc))
 
             def connection_lost(self, exc):
@@ -107,14 +110,17 @@ class FireplaceDatagram:
                 # wait for response to be received.
                 await on_complete
 
-            if cm.expired:
-                if transport:
-                    transport.close()
-                raise TimeoutError()
-
             on_complete.result()
 
-            return responses
+            if transport:
+                transport.close()
 
-        except (OSError, TimeoutError) as ex:
-            raise ConnectionError("Unable to send UDP") from ex
+            if cm.expired:
+                raise TimeoutError()
+
+            return responses
+        except:
+            exc = sys.exc_info()[0]
+            _LOG.exception('Unexpected error: %s - EXITING', exc)
+            # except (asyncio.CancelledError, OSError, TimeoutError) as ex:
+            raise ConnectionError('Unable to send UDP')

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 
 from abc import abstractmethod, ABC
 from asyncio import (AbstractEventLoop, Condition, Future, Task, )
@@ -14,7 +15,7 @@ from .controller import Controller
 from .datagram import FireplaceDatagram
 from .message import FireplaceMessage, CommandID
 
-DISCOVERY_SLEEP = 60.0  # Interval between status refreshes
+DISCOVERY_SLEEP = 5*60.0  # Interval between status refreshes
 DISCOVERY_RESCAN = 5.0  # Interval on a Controller losing comms
 
 BROADCAST_IP_ADDR = '255.255.255.255'
@@ -33,9 +34,8 @@ class LogExceptions:
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
             _LOG.exception(
-                "Exception ignored when calling listener %s", self.func)
+                'Exception ignored when calling listener %s', self.func)
         return True
-
 
 class Listener:
     """Base class for listeners for Escea updates"""
@@ -126,11 +126,11 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                           already running.
         """
         self._controllers = {}  # type: Dict[str, Controller]
-        self._disconnected = set()  # type: Set[str]
+        self._disconnected_uids = set()  # type: Set[str]
         self._listeners = []  # type: List[Listener]
         self._close_task = None  # type: Optional[Task]
 
-        _LOG.info("Starting discovery protocol")
+        _LOG.info('Starting discovery protocol')
         if not loop:
             self.loop = asyncio.get_event_loop()
         else:
@@ -139,6 +139,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self._broadcast_ip = ip_addr
         self._datagram = FireplaceDatagram(self.loop, ip_addr)
 
+        self._discovery_started = False
         self._scan_condition = Condition(loop=self.loop)  # type: Condition
 
         self._tasks = []  # type: List[Future]
@@ -153,7 +154,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
     def _task_done_callback(self, task: Task):
         if task.exception():
-            _LOG.exception("Uncaught exception", exc_info=task.exception())
+            _LOG.exception('Uncaught exception', exc_info=task.exception())
         self._tasks.remove(task)
 
     # managing the task list.
@@ -183,34 +184,34 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
     def controller_discovered(self, ctrl: Controller) -> None:
         _LOG.info(
-            "New controller found: id=%s ip=%s",
+            'New controller found: id=%s ip=%s',
             ctrl.device_uid, ctrl.device_ip)
         for listener in self._listeners:
-            with LogExceptions("controller_discovered"):
+            with LogExceptions('controller_discovered'):
                 listener.controller_discovered(ctrl)
 
     def controller_disconnected(self, ctrl: Controller, ex: Exception) -> None:
         _LOG.warning(
-            "Connection to controller lost: id=%s ip=%s",
+            'Connection to controller lost: id=%s ip=%s',
             ctrl.device_uid, ctrl.device_ip)
-        self._disconnected.add(ctrl.device_uid)
+        self._disconnected_uids.add(ctrl.device_uid)
         self.create_task(self._rescan())
         for listener in self._listeners:
-            with LogExceptions("controller_disconnected"):
+            with LogExceptions('controller_disconnected'):
                 listener.controller_disconnected(ctrl, ex)
 
     def controller_reconnected(self, ctrl: Controller) -> None:
         _LOG.warning(
-            "Controller reconnected: id=%s ip=%s",
+            'Controller reconnected: id=%s ip=%s',
             ctrl.device_uid, ctrl.device_ip)
-        self._disconnected.remove(ctrl.device_uid)
+        self._disconnected_uids.remove(ctrl.device_uid)
         for listener in self._listeners:
-            with LogExceptions("controller_reconnected"):
+            with LogExceptions('controller_reconnected'):
                 listener.controller_reconnected(ctrl)
 
     def controller_update(self, ctrl: Controller) -> None:
         for listener in self._listeners:
-            with LogExceptions("controller_update"):
+            with LogExceptions('controller_update'):
                 listener.controller_update(ctrl)
 
     @property
@@ -220,7 +221,9 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
     # Non-context versions of starting.
     async def start_discovery(self) -> None:
-        await self._send_broadcast()
+        if not self._discovery_started:
+            self._discovery_started = True
+            self.create_task(self._scan_loop())
 
     async def _scan_loop(self) -> None:
         while True:
@@ -228,47 +231,55 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
             try:
                 async with timeout(
-                        DISCOVERY_RESCAN if self._disconnected
+                        DISCOVERY_RESCAN if len(self._disconnected_uids) > 0
                         else DISCOVERY_SLEEP):
                     async with self._scan_condition:
                         await self._scan_condition.wait()
             except asyncio.TimeoutError:
                 pass
-
+            
             if self._close_task:
                 return
 
     async def _send_broadcast(self):
-        _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
+        _LOG.debug('Sending discovery message to addr %s', self._broadcast_ip)
         try:
             responses = await self._datagram.send_command(
                 CommandID.SEARCH_FOR_FIRES, broadcast=True)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
-        except (asyncio.TimeoutError) as ex:
-            raise ConnectionError("No controllers responded") \
-                from ex
+        except ConnectionError:
+            _LOG.warning('No controllers responded to broadcast')
 
     async def rescan(self) -> None:
+        if self.is_closed:
+            raise ConnectionError("Already closed")
         _LOG.debug("Manual rescan of controllers triggered.")
         await self._rescan()
 
+    # Wake up the main loop for immediate scan
     async def _rescan(self) -> None:
         async with self._scan_condition:
             self._scan_condition.notify()
 
     # Closing the connection
     async def close(self) -> None:
-        _LOG.info("Close called on discovery service.")
+        if self._close_task:
+            # Already called, so wait completion
+            await self._close_task
+            return
+        _LOG.info('Close called on discovery service.')
+        self._close_task = asyncio.current_task(loop=self.loop)
         for _, ctrl in self._controllers.items():
-            ctrl.close()
+            await ctrl.close()
+        # Wake up loop so it exists
+        await self._rescan()
         if len(self._tasks) > 0:
             await asyncio.wait(self._tasks)
 
-    def error_received(self, exc):
-        _LOG.warning(
-            "Error passed and ignored to error_received: %s",
-            repr(exc))
+    @property
+    def is_closed(self) -> bool:
+        return self._close_task is not None
 
     def _find_by_addr(self, addr: str) -> Optional[Controller]:
         for _, ctrl in self._controllers.items():
@@ -281,7 +292,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
             await coro
         except ConnectionError as ex:
             _LOG.warning(
-                "Unable to complete %s due to connection error: %s",
+                'Unable to complete %s due to connection error: %s',
                 coro, repr(ex))
 
     def _discovery_received(self, data: FireplaceMessage, addr):
@@ -299,8 +310,8 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                     await controller.initialize()
                 except ConnectionError as ex:
                     _LOG.warning(
-                        "Can't connect to discovered server at IP '%s'"
-                        " exception: %s", device_ip, repr(ex))
+                        "Can't connect to discovered server at IP '%s' exception: %s",
+                        device_ip, repr(ex))
                     return
 
                 self._controllers[device_uid] = controller

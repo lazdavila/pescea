@@ -29,7 +29,7 @@ class MockController(Controller):
             if result:
                 return deepcopy(result)
         raise ConnectionError(
-            "Mock resource '{}' not available".format(resource))
+            'Mock resource {} not available'.format(resource))
 
     async def send_command(self, command: CommandID, data: Any):
         """Mock out the network IO for send_command."""

@@ -24,14 +24,14 @@ def test_valid_commands():
         
         bytes = message.bytearray_
 
-        assert  bytes[0] == MESSAGE_START_BYTE, "Message start byte doesn't match"
-        assert  bytes[len(bytes)-1] == MESSAGE_END_BYTE, "Message end byte doesn't match"
-        assert  bytes[1], command.value == "Message command code doesn't match"
+        assert  bytes[0] == MESSAGE_START_BYTE, 'Message start byte does not match'
+        assert  bytes[len(bytes)-1] == MESSAGE_END_BYTE, 'Message end byte does not match'
+        assert  bytes[1], command.value == 'Message command code does not match'
         
         if command == CommandID.NEW_SET_TEMP:
-            assert  bytes[2] == 1, "Command data length must equal 1"
+            assert  bytes[2] == 1, 'Command data length must equal 1'
         else:
-            assert  bytes[2] == 0, "Command data length is non zero"
+            assert  bytes[2] == 0, 'Command data length is non zero'
 
 def test_invalid_commands():
 

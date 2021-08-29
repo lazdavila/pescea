@@ -4,7 +4,7 @@ import logging
 
 from enum import Enum
 
-_LOG = logging.getLogger("pescea.message")
+_LOG = logging.getLogger('pescea.message')
 
 # The same message structure is used for commands and responses:
 MESSAGE_LENGTH = 15
@@ -250,7 +250,7 @@ class FireplaceMessage:
                 raise ValueError('Invalid message id')
 
         else:
-            raise(ValueError,"Invalid constructor")
+            raise(ValueError,'Invalid constructor')
 
     @property
     def command_id(self) -> CommandID:

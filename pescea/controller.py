@@ -5,14 +5,15 @@ import asyncio
 import sys
 
 from enum import Enum
-from typing import Dict, Union, Optional
+from typing import Dict, Union
 from time import time
+from async_timeout import timeout
 
 # Pescea imports:
 from pescea.message import FireplaceMessage, CommandID, ResponseID, MIN_SET_TEMP, MAX_SET_TEMP, expected_response
 from pescea.datagram import FireplaceDatagram
 
-_LOG = logging.getLogger("pescea.controller")
+_LOG = logging.getLogger('pescea.controller')
 
 # Time to wait for results from UDP command to server
 REQUEST_TIMEOUT = 5
@@ -52,10 +53,10 @@ class ControllerState(Enum):
                 - The Controller will continue to poll at a reduced rate
                 - The Controller buffers requests but cannot send to the Fireplace
     """
-    BUSY = "BusyWaiting"
-    READY = "Ready"
-    NON_RESPONSIVE = "NonResponsive"
-    DISCONNECTED = "Disconnected"
+    BUSY = 'BusyWaiting'
+    READY = 'Ready'
+    NON_RESPONSIVE = 'NonResponsive'
+    DISCONNECTED = 'Disconnected'
 
 class Fan(Enum):
     """All fan modes"""
@@ -65,14 +66,14 @@ class Fan(Enum):
 
 class DictEntries(Enum):
     """Available controller attributes - Internal Use Only"""
-    IP_ADDRESS = "IPAddress"
-    DEVICE_UID = "DeviceUId"
-    CONTROLLER_STATE = "ControllerState"
-    HAS_NEW_TIMERS = "HasNewTimers"
-    FIRE_IS_ON = "FireIsOn"
-    FAN_MODE = "FanMode"
-    DESIRED_TEMP = "DesiredTemp"
-    CURRENT_TEMP = "CurrentTemp"
+    IP_ADDRESS = 'IPAddress'
+    DEVICE_UID = 'DeviceUId'
+    CONTROLLER_STATE = 'ControllerState'
+    HAS_NEW_TIMERS = 'HasNewTimers'
+    FIRE_IS_ON = 'FireIsOn'
+    FAN_MODE = 'FanMode'
+    DESIRED_TEMP = 'DesiredTemp'
+    CURRENT_TEMP = 'CurrentTemp'
 
 class Controller:
     """Interface to Escea controller"""
@@ -107,6 +108,8 @@ class Controller:
         self._sending_lock = asyncio.Lock()
         self._datagram = FireplaceDatagram(self._discovery.loop, device_ip)
 
+        self._loop_interrupt_condition = asyncio.Condition(loop=self._discovery.loop)
+
         self._initialised = False        
 
     async def initialize(self) -> None:
@@ -130,9 +133,11 @@ class Controller:
         # Start regular polling for status updates
         self._discovery.loop.create_task(self._poll_loop())
 
-    def close(self):
+    async def close(self):
         """Signal loop to exit"""
         self._closed = True
+        async with self._loop_interrupt_condition:
+            self._loop_interrupt_condition.notify()
 
     async def _poll_loop(self) -> None:
         """ Regularly poll for status update from fireplace.
@@ -145,9 +150,11 @@ class Controller:
                 await self._refresh_system()
             except:
                 exc = sys.exc_info()[0]
-                print("Unexpected error:", sys.exc_info()[0])
+                _LOG.exception('Unexpected error: %s - EXITING', exc)
+                self._closed = True
+                return
 
-            _LOG.debug("Polling unit %s at address %s (current state is %s)",
+            _LOG.debug('Polling unit %s at address %s (current state is %s)',
                 self._system_settings[DictEntries.DEVICE_UID],
                 self._system_settings[DictEntries.IP_ADDRESS],
                 self._state)
@@ -161,7 +168,13 @@ class Controller:
             elif self._state == ControllerState.BUSY:
                 sleep_time = max(self._busy_end_time - time(), 0.0)
 
-            await asyncio.sleep(sleep_time)
+            try:
+                # Sleep for poll time, allow early wakeup
+                async with timeout(sleep_time):
+                    async with self._loop_interrupt_condition:
+                        await self._loop_interrupt_condition.wait()
+            except asyncio.TimeoutError:
+                pass
 
     @property
     def device_ip(self) -> str:
@@ -178,14 +191,14 @@ class Controller:
         return self._discovery
 
     @property
-    def state(self) -> Optional[ControllerState]:
+    def state(self) -> ControllerState:
         """True if the system is turned on"""
         return self._state
 
     @property
-    def is_on(self) -> Optional[bool]:
+    def is_on(self) -> bool:
         """True if the system is turned on"""
-        return self._get_system_state(DictEntries.FIRE_IS_ON) or None
+        return self._get_system_state(DictEntries.FIRE_IS_ON)
 
     async def set_on(self, value: bool) -> None:
         """Turn the system on or off.
@@ -195,9 +208,9 @@ class Controller:
         await self._set_system_state(DictEntries.FIRE_IS_ON, value)
 
     @property
-    def fan(self) -> Optional[Fan]:
+    def fan(self) -> Fan:
         """The current fan level."""
-        return self._get_system_state(DictEntries.FAN_MODE) or None
+        return self._get_system_state(DictEntries.FAN_MODE)
 
     async def set_fan(self, value: Fan) -> None:
         """The fan level. 
@@ -206,10 +219,10 @@ class Controller:
         await self._set_system_state(DictEntries.FAN_MODE, value)
 
     @property
-    def desired_temp(self) -> Optional[float]:
+    def desired_temp(self) -> float:
         """fireplace DesiredTemp temperature.
         """
-        return float(self._get_system_state(DictEntries.DESIRED_TEMP)) or None
+        return float(self._get_system_state(DictEntries.DESIRED_TEMP))
 
     async def set_desired_temp(self, value: float):
         """Fireplace DesiredTemp temperature.
@@ -221,15 +234,15 @@ class Controller:
         """
         degrees = round(value)
         if degrees < MIN_SET_TEMP or degrees > MAX_SET_TEMP:
-            _LOG.error("Desired Temp %s is out of range (%s-%s)", degrees, MIN_SET_TEMP, MAX_SET_TEMP)
+            _LOG.error('Desired Temp %s is out of range (%s-%s)', degrees, MIN_SET_TEMP, MAX_SET_TEMP)
             return
 
         await self._set_system_state(DictEntries.DESIRED_TEMP, degrees)
 
     @property
-    def current_temp(self) -> Optional[float]:
+    def current_temp(self) -> float:
         """The room air temperature"""
-        return float(self._get_system_state(DictEntries.CURRENT_TEMP)) or None
+        return float(self._get_system_state(DictEntries.CURRENT_TEMP))
 
     @property
     def min_temp(self) -> float:
@@ -336,12 +349,12 @@ class Controller:
                     # all good
                     self._last_response = time()
                     return responses[this_response]
-            # If we get here... did not receive a response or not valid
+        except ConnectionError:
+            pass
+        # If we get here... did not receive a response or not valid
+        if self._state != ControllerState.DISCONNECTED:
             self._state = ControllerState.NON_RESPONSIVE
-            return
-
-        except (TimeoutError) as ex:
-            return None
+        return None
 
     def refresh_address(self, address):
         """Called from discovery to update the address"""
@@ -351,9 +364,11 @@ class Controller:
         self._datagram.set_ip(address)
         self._system_settings[DictEntries.IP_ADDRESS] = address
 
-        # If we are DISCONNECTED, then reset the time change so we poll a bit quicker
-        if self._state == ControllerState.DISCONNECTED:
-            self._state_changed = time()
+        async def signal_loop(self):
+            async with self._loop_interrupt_condition:
+                self._loop_interrupt_condition.notify()
+
+        self._discovery.loop.create_task(signal_loop(self))
 
     def _get_system_state(self, state: DictEntries):
         return self._system_settings[state]
@@ -412,18 +427,22 @@ class Controller:
                     command = CommandID.FAN_BOOST_OFF
 
         else:
-            raise(AttributeError, "Unexpected state: {0}".format(state))
+            raise(AttributeError, 'Unexpected state: {0}'.format(state))
 
         if command is not None:
-            async with self._sending_lock:
-                responses = await self._datagram.send_command(command, value)
-            if (len(responses) > 0) \
+            valid_response = False
+            try:
+                async with self._sending_lock:
+                    responses = await self._datagram.send_command(command, value)
+                if (len(responses) > 0) \
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
-                # all good
+                        # No / invalid response
+                        valid_response = True
+            except ConnectionError:
+                pass
+            if valid_response:
                 self._last_response = time()
             else:
-                # not the expected response, or got no response
-                self._state = ControllerState.NON_RESPONSIVE
                 return
 
         if (state == DictEntries.FAN_MODE) and (value != Fan.AUTO):
@@ -443,15 +462,19 @@ class Controller:
             else:
                 command = CommandID.FLAME_EFFECT_ON
 
-            async with self._sending_lock:
-                responses = await self._datagram.send_command(command, value)
-            if (len(responses) > 0) \
+            valid_response = False
+            try:
+                async with self._sending_lock:
+                    responses = await self._datagram.send_command(command, value)
+                if (len(responses) > 0) \
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
-                # all good
+                        # No / invalid response
+                        valid_response = True
+            except ConnectionError:
+                pass
+            if valid_response:
                 self._last_response = time()
             else:
-                # not the expected response, or got no response
-                self._state = ControllerState.NON_RESPONSIVE
                 return
 
         # Need to refresh immediately after setting (unless synching, then poll loop will update)

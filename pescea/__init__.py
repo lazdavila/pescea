@@ -1,6 +1,6 @@
-"""Interface to the Escea fireplace controller
+""" Interface to the Escea fireplace controller
 
-Interaction through the Controller class.
+    Interaction through the Controller class.
 """
 
 from .controller import Controller

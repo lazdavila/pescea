@@ -29,7 +29,7 @@ async def test_search_for_fires(mocker):
     assert len(responses) == 3
     for addr in responses:
         serial_number = responses[addr].serial_number
-        assert fireplaces[serial_number]["IPAddress"] == addr
+        assert fireplaces[serial_number]['IPAddress'] == addr
 
     # Teardown:
     asyncio.gather(*asyncio.all_tasks())
@@ -44,14 +44,14 @@ async def test_get_status(mocker):
 
     event_loop = asyncio.get_event_loop()
     uid = list(fireplaces.keys())[0]
-    datagram = FireplaceDatagram(event_loop, device_ip= fireplaces[uid]["IPAddress"])
+    datagram = FireplaceDatagram(event_loop, device_ip= fireplaces[uid]['IPAddress'])
 
     # Test step:
     responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
 
     assert len(responses) == 1
-    assert responses[fireplaces[uid]["IPAddress"]].fire_is_on == fireplaces[uid]["FireIsOn"]
-    assert responses[fireplaces[uid]["IPAddress"]].desired_temp == fireplaces[uid]["DesiredTemp"]
+    assert responses[fireplaces[uid]['IPAddress']].fire_is_on == fireplaces[uid]['FireIsOn']
+    assert responses[fireplaces[uid]['IPAddress']].desired_temp == fireplaces[uid]['DesiredTemp']
 
     # Teardown:
     asyncio.gather(*asyncio.all_tasks())
@@ -74,9 +74,9 @@ async def test_timeout_error(mocker):
     uid = list(fireplaces.keys())[0]
 
     # Test step:
-    datagram = FireplaceDatagram(event_loop, device_ip= fireplaces[uid]["IPAddress"])
+    datagram = FireplaceDatagram(event_loop, device_ip= fireplaces[uid]['IPAddress'])
 
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(ConnectionError):
         responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
 
      # Teardown6
@@ -100,7 +100,7 @@ async def test_connection_error(mocker):
     uid = list(fireplaces.keys())[0]
 
     # Test step:
-    datagram = FireplaceDatagram(event_loop, device_ip= fireplaces[uid]["IPAddress"])
+    datagram = FireplaceDatagram(event_loop, device_ip= fireplaces[uid]['IPAddress'])
 
     responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
     assert len(responses) == 0

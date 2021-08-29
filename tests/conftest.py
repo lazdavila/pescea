@@ -12,7 +12,7 @@ from .resources import test_fireplaces
 
 fireplaces = test_fireplaces()
 
-_LOG = logging.getLogger('tests.conftest')  # type: Logger
+_LOG = logging.getLogger('tests.conftest')  # type: logging.Logger
 
 class PatchedDatagramTransport(DatagramTransport):
     """ Sets up a patched version of DataTransport used to simulate comms to a fireplace.
@@ -26,7 +26,7 @@ class PatchedDatagramTransport(DatagramTransport):
         self.uid = None
         self.responses = []
         self.closed = False
-        self.event = Event()
+        self.response_is_ready = Event()
 
     def sendto(self, data, addr=None):
         if self.closed:
@@ -35,47 +35,49 @@ class PatchedDatagramTransport(DatagramTransport):
         # data is bytearray
         self.command = FireplaceMessage( incoming= data)
 
-        # Update internal state
-        if self.command.command_id == CommandID.FAN_BOOST_OFF:
-            fireplaces[self.uid]["FanBoost"] = False
-        elif self.command.command_id == CommandID.FAN_BOOST_ON:
-            fireplaces[self.uid]["FanBoost"] = True
-        elif self.command.command_id == CommandID.FLAME_EFFECT_OFF:
-            fireplaces[self.uid]["FlameEffect"] = False
-        elif self.command.command_id == CommandID.FLAME_EFFECT_ON:
-            fireplaces[self.uid]["FlameEffect"] = True    
-        elif self.command.command_id == CommandID.POWER_ON:
-            fireplaces[self.uid]["FireIsOn"] = True
-        elif self.command.command_id == CommandID.POWER_OFF:
-            fireplaces[self.uid]["FireIsOn"] = False
-        elif self.command.command_id == CommandID.NEW_SET_TEMP:
-            fireplaces[self.uid]["DesiredTemp"] = int(self.command.desired_temp)
-            fireplaces[self.uid]["CurrentTemp"] = int((self.command.desired_temp + fireplaces[self.uid]["CurrentTemp"]) / 2.0)
-
-        # Prepare responses
+        # Prepare responses (broadcast, with multiple responses)
         if self.command.command_id == CommandID.SEARCH_FOR_FIRES:
             for uid in fireplaces:
-                self.responses.append((FireplaceMessage.mock_response(response_id= ResponseID.I_AM_A_FIRE, uid=uid), fireplaces[uid]["IPAddress"]))
+                self.responses.append((FireplaceMessage.mock_response(response_id= ResponseID.I_AM_A_FIRE, uid=uid), fireplaces[uid]['IPAddress']))
 
-        elif self.command.command_id == CommandID.STATUS_PLEASE:
-            self.responses.append((
-                FireplaceMessage.mock_response(
-                    response_id= ResponseID.STATUS,
-                    uid= self.uid,
-                    has_new_timers= fireplaces[self.uid]["HasNewTimers"],
-                    fire_on=fireplaces[self.uid]["FireIsOn"], 
-                    fan_boost_on=fireplaces[self.uid]["FanBoost"], 
-                    effect_on=fireplaces[self.uid]["FlameEffect"], 
-                    desired_temp=int(fireplaces[self.uid]["DesiredTemp"]),
-                    current_temp=int(fireplaces[self.uid]["CurrentTemp"])), 
-                fireplaces[self.uid]["IPAddress"]
-            ))
+        elif self.uid !=0:
+            
+            # Update internal simulated state
+            if self.command.command_id == CommandID.FAN_BOOST_OFF:
+                fireplaces[self.uid]['FanBoost'] = False
+            elif self.command.command_id == CommandID.FAN_BOOST_ON:
+                fireplaces[self.uid]['FanBoost'] = True
+            elif self.command.command_id == CommandID.FLAME_EFFECT_OFF:
+                fireplaces[self.uid]['FlameEffect'] = False
+            elif self.command.command_id == CommandID.FLAME_EFFECT_ON:
+                fireplaces[self.uid]['FlameEffect'] = True    
+            elif self.command.command_id == CommandID.POWER_ON:
+                fireplaces[self.uid]['FireIsOn'] = True
+            elif self.command.command_id == CommandID.POWER_OFF:
+                fireplaces[self.uid]['FireIsOn'] = False
+            elif self.command.command_id == CommandID.NEW_SET_TEMP:
+                fireplaces[self.uid]['DesiredTemp'] = int(self.command.desired_temp)
+                fireplaces[self.uid]['CurrentTemp'] = int((self.command.desired_temp + fireplaces[self.uid]['CurrentTemp']) / 2.0)
 
-        else:
-            self.responses.append((FireplaceMessage.mock_response(expected_response(self.command.command_id)), fireplaces[self.uid]["IPAddress"]))
+            if self.command.command_id == CommandID.STATUS_PLEASE:
+                self.responses.append((
+                    FireplaceMessage.mock_response(
+                        response_id= ResponseID.STATUS,
+                        uid= self.uid,
+                        has_new_timers= fireplaces[self.uid]['HasNewTimers'],
+                        fire_on=fireplaces[self.uid]['FireIsOn'], 
+                        fan_boost_on=fireplaces[self.uid]['FanBoost'], 
+                        effect_on=fireplaces[self.uid]['FlameEffect'], 
+                        desired_temp=int(fireplaces[self.uid]['DesiredTemp']),
+                        current_temp=int(fireplaces[self.uid]['CurrentTemp'])), 
+                    fireplaces[self.uid]['IPAddress']
+                ))
+
+            else:
+                self.responses.append((FireplaceMessage.mock_response(expected_response(self.command.command_id)), fireplaces[self.uid]['IPAddress']))
 
         # Notify data is ready to collect
-        self.event.set()
+        self.response_is_ready.set()
 
     def close(self):
         self.closed = True
@@ -83,7 +85,7 @@ class PatchedDatagramTransport(DatagramTransport):
     @property
     def next_response(self):
         if self.closed or len(self.responses) == 0 \
-            or (self.uid != 0 and not fireplaces[self.uid]["Responsive"]):
+            or (self.uid != 0 and not fireplaces[self.uid]['Responsive']):
             return None, None
 
         response = self.responses.pop(0)
@@ -108,8 +110,8 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
     else:
         protocol.connection_made(transport)
 
-        await transport.event.wait()
-        transport.event.clear()
+        await transport.response_is_ready.wait()
+        transport.response_is_ready.clear()
         next_response, addr = transport.next_response
 
         if next_response is not None:
@@ -158,18 +160,17 @@ async def patched_create_datagram_endpoint(
     assert remote_addr is not None
 
     transport = PatchedDatagramTransport()
-    if allow_broadcast == True:
-        transport.uid = 0
-    else:
+    transport.uid = 0
+    if not allow_broadcast:
         for uid in fireplaces:
-            if fireplaces[uid]["IPAddress"] == remote_addr[0]:
+            if fireplaces[uid]['IPAddress'] == remote_addr[0]:
                 transport.uid = uid
                 break
 
     protocol = protocol_factory()
 
     _LOG.debug(
-        "Datagram endpoint remote_addr created: %s",str(remote_addr))
+        'Datagram endpoint remote_addr created: %s',str(remote_addr))
 
     asyncio.create_task(simulate_comms_patchable(transport, protocol, allow_broadcast))
 

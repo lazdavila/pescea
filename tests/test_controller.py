@@ -25,7 +25,7 @@ async def test_controller_basics(mocker):
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
-    device_ip = fireplaces[device_uid]["IPAddress"]
+    device_ip = fireplaces[device_uid]['IPAddress']
 
     # Test steps:
     controller = Controller(discovery, device_uid, device_ip)
@@ -69,7 +69,7 @@ async def test_controller_basics(mocker):
     assert controller.current_temp is not None
 
     # Teardown:
-    controller.close()
+    await controller.close()
     await sleep(0.2)
     asyncio.gather(*asyncio.all_tasks())
 
@@ -90,7 +90,7 @@ async def test_controller_change_address(mocker):
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
-    device_ip = fireplaces[device_uid]["IPAddress"]
+    device_ip = fireplaces[device_uid]['IPAddress']
 
     # Test steps:
     controller = Controller(discovery, device_uid, device_ip)
@@ -101,17 +101,21 @@ async def test_controller_change_address(mocker):
     assert controller.discovery == discovery
     assert controller.state == ControllerState.READY
 
-    new_ip = '192.168.0.222'
+    new_ip = '10.10.10.10'
+    fireplaces[device_uid]['IPAddress'] = new_ip
+
+    await sleep(0.6)
+    assert controller.state == ControllerState.DISCONNECTED
+
     controller.refresh_address(new_ip)
-    assert controller.device_ip == new_ip
 
     # Allow time to poll for status and check still get response
-    await sleep(0.2)
+    await sleep(0.3)
     assert controller.state == ControllerState.READY
     assert controller.device_ip == new_ip
 
     # Teardown:
-    controller.close()
+    await controller.close()
     await sleep(0.2)
     asyncio.gather(*asyncio.all_tasks())
 
@@ -131,7 +135,7 @@ async def test_controller_poll(mocker):
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
-    device_ip = fireplaces[device_uid]["IPAddress"]
+    device_ip = fireplaces[device_uid]['IPAddress']
 
     # Test steps:
     controller = Controller(discovery, device_uid, device_ip)
@@ -154,14 +158,14 @@ async def test_controller_poll(mocker):
     assert controller.is_on
 
     # Change in the backend what our more fireplace returns
-    fireplaces[device_uid]["FireIsOn"] = False
+    fireplaces[device_uid]['FireIsOn'] = False
 
     await sleep(2.0)
     # Check the poll command has read the changed status
     assert not controller.is_on
 
     # Teardown:
-    controller.close()
+    await controller.close()
     await sleep(0.2)
     asyncio.gather(*asyncio.all_tasks())
 
@@ -183,14 +187,14 @@ async def test_controller_disconnect_reconnect(mocker):
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
-    device_ip = fireplaces[device_uid]["IPAddress"]
+    device_ip = fireplaces[device_uid]['IPAddress']
 
     controller = Controller(discovery, device_uid, device_ip)
     await controller.initialize()
     assert controller.device_ip == device_ip
     assert controller.state == ControllerState.READY
 
-    fireplaces[device_uid]["Responsive"] = False
+    fireplaces[device_uid]['Responsive'] = False
 
     await sleep(0.1)
     assert controller.state == ControllerState.NON_RESPONSIVE
@@ -198,16 +202,16 @@ async def test_controller_disconnect_reconnect(mocker):
     await sleep(0.3)
     assert controller.state == ControllerState.DISCONNECTED
 
-    new_ip = fireplaces[list(fireplaces.keys())[-1]]["IPAddress"]
+    new_ip = fireplaces[list(fireplaces.keys())[-1]]['IPAddress']
     controller.refresh_address(new_ip)
     assert controller.device_ip == new_ip
 
-    fireplaces[device_uid]["Responsive"] = True
+    fireplaces[device_uid]['Responsive'] = True
     await sleep(0.6)
     
     assert controller.state == ControllerState.READY
 
     # clean shutdown
-    controller.close()
+    await controller.close()
     await sleep(0.6)
     asyncio.gather(*asyncio.all_tasks())
