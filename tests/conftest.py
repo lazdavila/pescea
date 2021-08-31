@@ -75,7 +75,7 @@ class PatchedDatagramTransport(DatagramTransport):
         # Prepare responses (broadcast, with multiple responses)
         if self.command.command_id == CommandID.SEARCH_FOR_FIRES:
             for uid in fireplaces:
-                if fireplaces[uid]['Responsive']:
+                if fireplaces[uid]['Responsive'] and (self.uid == 0 or self.uid == uid):
                     self.responses.append((FireplaceMessage.mock_response(response_id= ResponseID.I_AM_A_FIRE, uid=uid), fireplaces[uid]['IPAddress']))
 
         elif self.uid !=0:
@@ -199,11 +199,11 @@ async def patched_create_datagram_endpoint(
 
     transport = PatchedDatagramTransport()
     transport.uid = 0
-    if not allow_broadcast:
-        for uid in fireplaces:
-            if fireplaces[uid]['IPAddress'] == remote_addr[0]:
-                transport.uid = uid
-                break
+    # if not allow_broadcast:
+    for uid in fireplaces:
+        if fireplaces[uid]['IPAddress'] == remote_addr[0]:
+            transport.uid = uid
+            break
 
     protocol = protocol_factory()
 

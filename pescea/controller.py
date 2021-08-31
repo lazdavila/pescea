@@ -439,7 +439,6 @@ class Controller:
                         _LOG.debug('_set_system_state - send_command(success): %s -> %s',   
                                 str(self.device_uid),
                                 str(command))                           
-                        print('uid: '+str(self.device_uid)+ ' SENT: ' + str(command))
 
             except ConnectionError:
                 pass
@@ -476,7 +475,9 @@ class Controller:
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
                         # No / invalid response
                         valid_response = True
-                        print('uid: '+str(self.device_uid)+ ' SENT: ' + str(command))                        
+                        _LOG.debug('_set_system_state - send_command(success): %s -> %s',   
+                                str(self.device_uid),
+                                str(command))                       
             except ConnectionError:
                 pass
             if valid_response:

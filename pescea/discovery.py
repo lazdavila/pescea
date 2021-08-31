@@ -158,7 +158,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
             _LOG.exception('Uncaught exception', exc_info=task.exception())
         self._tasks.remove(task)
 
-    # managing the task list.
+    # managing the task list (also called by controller)
     def create_task(self, coro) -> Task:
         """Create a task in the event loop. Keeps track of created tasks."""
         task = self.loop.create_task(coro)  # type: Task
