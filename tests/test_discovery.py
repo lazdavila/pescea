@@ -7,7 +7,7 @@ from asyncio import sleep
 from pescea.controller import Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
 
-from .conftest import fireplaces, patched_create_datagram_endpoint
+from .conftest import fireplaces, get_test_fireplaces, patched_create_datagram_endpoint
 
 @mark.asyncio
 async def test_service_basics(mocker):
@@ -131,8 +131,13 @@ async def test_no_controllers_found(mocker):
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.3)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.5)
 
+    mocker.patch('pescea.discovery.DISCOVERY_SLEEP', 0.3)
+    mocker.patch('pescea.discovery.DISCOVERY_RESCAN', 0.1)
+
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
+
     for f in fireplaces:
-        fireplaces[f]['NonResponsive'] = True
+        fireplaces[f]['Responsive'] = False
 
     discovery = DiscoveryService()
     await discovery.start_discovery()
@@ -142,32 +147,19 @@ async def test_no_controllers_found(mocker):
     # check no controllers found
     assert len(discovery.controllers) == 0
 
-    await sleep(0.2)
-    # check controllers found
-    assert len(discovery.controllers) == 3
+    c_count = 0
+    for f in fireplaces:
+        fireplaces[f]['Responsive'] = True
+        c_count += 1
+        await sleep(0.4)
+        # check controllers found again after a rescan
+        assert len(discovery.controllers) == c_count
 
+    fireplaces[next(iter(fireplaces))]['Responsive'] = False
     fireplaces[next(iter(fireplaces))]['IPAddress'] = '11.11.11.11'
 
-    await sleep(0.2)
-    assert len(discovery.controllers) == 2
-
-    fireplaces = test_fireplaces()
-
-    await sleep(0.2)
-    # check controllers found
-    assert len(discovery.controllers) == 3
+    # controllers remain in the list, even after disconnected
+    await sleep(0.3)
+    assert len(discovery.controllers) == c_count
 
     await discovery.close()
-
-
-async def test_controller_disconnection(mocker):
-    # grab service
-
-    # check has searched for fireplaces
-
-    # check has three fireplaces
-
-    # attempt to control each controller
-
-    # shut down each controller
-    pass

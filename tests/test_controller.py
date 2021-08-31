@@ -56,10 +56,15 @@ async def test_controller_basics(mocker):
     assert controller.state == ControllerState.READY
     assert not controller.is_on
 
-    for fan in Fan:
-        await controller.set_fan(fan)
-        assert controller.fan == fan
-        assert controller.state == ControllerState.READY
+    # Test all Fan transitions
+    for from_fan in Fan:
+        for to_fan in Fan:
+            await controller.set_fan(from_fan)
+            assert controller.fan == from_fan
+            assert controller.state == ControllerState.READY
+            await controller.set_fan(to_fan)
+            assert controller.fan == to_fan
+            assert controller.state == ControllerState.READY
 
     for temp in range(int(controller.min_temp), int(controller.max_temp)):
         await controller.set_desired_temp(float(temp))
@@ -160,7 +165,7 @@ async def test_controller_poll(mocker):
     # Change in the backend what our more fireplace returns
     fireplaces[device_uid]['FireIsOn'] = False
 
-    await sleep(2.0)
+    await sleep(0.2)
     # Check the poll command has read the changed status
     assert not controller.is_on
 

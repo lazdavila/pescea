@@ -1,7 +1,6 @@
 """Test UDP datagram functionality """
 import asyncio
 
-
 import pytest
 from pytest import mark
  
@@ -68,7 +67,7 @@ async def test_timeout_error(mocker):
         'tests.conftest.simulate_comms_patchable',
         simulate_comms_timeout_error
     )
-    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.3)
 
     event_loop = asyncio.get_event_loop()
     uid = list(fireplaces.keys())[0]
@@ -80,7 +79,6 @@ async def test_timeout_error(mocker):
         responses = await datagram.send_command(command = CommandID.STATUS_PLEASE)
 
      # Teardown6
-    await asyncio.sleep(2*REQUEST_TIMEOUT)
     asyncio.gather(*asyncio.all_tasks())
 
 @pytest.mark.asyncio
@@ -95,6 +93,8 @@ async def test_connection_error(mocker):
         'tests.conftest.simulate_comms_patchable',
         simulate_comms_connection_error
     )
+
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.3)
 
     event_loop = asyncio.get_event_loop()
     uid = list(fireplaces.keys())[0]

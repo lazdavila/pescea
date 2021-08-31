@@ -5,7 +5,7 @@ import logging
 import sys
 
 from abc import abstractmethod, ABC
-from asyncio import (AbstractEventLoop, Condition, Future, Task, )
+from asyncio import (AbstractEventLoop, Condition, Future, Task, Lock, )
 from async_timeout import timeout
 from logging import Logger
 from typing import Dict, List, Set, Optional
@@ -129,6 +129,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self._disconnected_uids = set()  # type: Set[str]
         self._listeners = []  # type: List[Listener]
         self._close_task = None  # type: Optional[Task]
+        self._sending_lock = Lock()
 
         _LOG.info('Starting discovery protocol')
         if not loop:
@@ -191,7 +192,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                 listener.controller_discovered(ctrl)
 
     def controller_disconnected(self, ctrl: Controller, ex: Exception) -> None:
-        _LOG.warning(
+        _LOG.debug(
             'Connection to controller lost: id=%s ip=%s',
             ctrl.device_uid, ctrl.device_ip)
         self._disconnected_uids.add(ctrl.device_uid)
@@ -201,7 +202,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                 listener.controller_disconnected(ctrl, ex)
 
     def controller_reconnected(self, ctrl: Controller) -> None:
-        _LOG.warning(
+        _LOG.debug(
             'Controller reconnected: id=%s ip=%s',
             ctrl.device_uid, ctrl.device_ip)
         self._disconnected_uids.remove(ctrl.device_uid)
@@ -244,7 +245,8 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     async def _send_broadcast(self):
         _LOG.debug('Sending discovery message to addr %s', self._broadcast_ip)
         try:
-            responses = await self._datagram.send_command(
+            async with self._sending_lock:
+                responses = await self._datagram.send_command(
                 CommandID.SEARCH_FOR_FIRES, broadcast=True)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
@@ -326,7 +328,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         return Controller(
             self, device_uid=device_uid, device_ip=device_ip)
 
-def discovery(*listeners: Listener,
+def discovery_service(*listeners: Listener,
               loop: AbstractEventLoop = None,
               ip_addr: str = None) -> AbstractDiscoveryService:
     """Create discovery service. Returned object is an asynchronous

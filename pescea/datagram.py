@@ -45,8 +45,6 @@ class FireplaceDatagram:
 
         self._fail_exception = None
 
-        self._sending_lock = asyncio.Lock()
-
     @property
     def ip(self) -> str:
         """Target IP address"""
@@ -98,7 +96,7 @@ class FireplaceDatagram:
                     self._message.command_id, str(exc))
 
             def connection_lost(self, exc):
-                self._on_complete.set_result(True)
+                self._on_complete.set_result(exc)
 
         try:
             async with timeout(REQUEST_TIMEOUT) as cm:
@@ -110,17 +108,15 @@ class FireplaceDatagram:
                 # wait for response to be received.
                 await on_complete
 
-            on_complete.result()
-
-            if transport:
-                transport.close()
-
             if cm.expired:
+                if transport:
+                    transport.close()                
                 raise TimeoutError()
+
+            # This raises any exception in Protocol (or if has no result)
+            on_complete.result()
 
             return responses
         except:
             exc = sys.exc_info()[0]
-            _LOG.exception('Unexpected error: %s - EXITING', exc)
-            # except (asyncio.CancelledError, OSError, TimeoutError) as ex:
-            raise ConnectionError('Unable to send UDP')
+            raise ConnectionError('Unable to send UDP: ' + str(exc))

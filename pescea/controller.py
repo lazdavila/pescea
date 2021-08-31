@@ -105,7 +105,6 @@ class Controller:
         self._system_settings[DictEntries.IP_ADDRESS] = device_ip
         self._system_settings[DictEntries.DEVICE_UID] = device_uid
 
-        self._sending_lock = asyncio.Lock()
         self._datagram = FireplaceDatagram(self._discovery.loop, device_ip)
 
         self._loop_interrupt_condition = asyncio.Condition(loop=self._discovery.loop)
@@ -341,7 +340,7 @@ class Controller:
 
     async def _request_status(self) -> FireplaceMessage:
         try:
-            async with self._sending_lock:
+            async with self._discovery._sending_lock:
                 responses = await self._datagram.send_command(CommandID.STATUS_PLEASE)
             if (len(responses) > 0):
                 this_response = next(iter(responses)) # only expecting one
@@ -379,6 +378,13 @@ class Controller:
         if (not sync) and (self._system_settings[state] == value):
             return
 
+        _LOG.debug('_set_system_state - uid: %s | %s from:%s to:%s  (sync:%s)',   
+                str(self.device_uid),
+                str(state),
+                str(self._system_settings[state]),
+                str(value),
+                str(sync))   
+
         # save the new value internally
         self._system_settings[state] = value
 
@@ -404,27 +410,19 @@ class Controller:
             # PART 1 -
             #
             # To AUTO:
-            # 1. If currently FAN_BOOST, turn off FAN_BOOST
-            #    else (currently FLAME_EFFECT), turn off FLAME_EFFECT
+            # 1. turn off FAN_BOOST
             if value == Fan.AUTO:
-                if self._system_settings[state] == Fan.FAN_BOOST:
-                    command = CommandID.FAN_BOOST_OFF
-                else:
-                    command = CommandID.FLAME_EFFECT_OFF
+                command = CommandID.FAN_BOOST_OFF
 
             # To FAN_BOOST:
-            # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
-            # 2. Turn on FAN_BOOST
+            # 1. Turn off FLAME_EFFECT
             elif value == Fan.FAN_BOOST:
-                if self._system_settings[state] == Fan.FLAME_EFFECT:
-                    command = CommandID.FLAME_EFFECT_OFF
+                command = CommandID.FLAME_EFFECT_OFF
 
             # To FLAME_EFFECT:
-            # 1. If currently FAN_BOOST, turn off FAN_BOOST
-            # 2. Turn on FLAME_EFFECT
+            # 1. Turn off FAN_BOOST
             elif value == Fan.FLAME_EFFECT:
-                if self._system_settings[state] == Fan.FAN_BOOST:
-                    command = CommandID.FAN_BOOST_OFF
+                command = CommandID.FAN_BOOST_OFF
 
         else:
             raise(AttributeError, 'Unexpected state: {0}'.format(state))
@@ -432,12 +430,17 @@ class Controller:
         if command is not None:
             valid_response = False
             try:
-                async with self._sending_lock:
+                async with self._discovery._sending_lock:
                     responses = await self._datagram.send_command(command, value)
                 if (len(responses) > 0) \
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
                         # No / invalid response
                         valid_response = True
+                        _LOG.debug('_set_system_state - send_command(success): %s -> %s',   
+                                str(self.device_uid),
+                                str(command))                           
+                        print('uid: '+str(self.device_uid)+ ' SENT: ' + str(command))
+
             except ConnectionError:
                 pass
             if valid_response:
@@ -445,31 +448,35 @@ class Controller:
             else:
                 return
 
-        if (state == DictEntries.FAN_MODE) and (value != Fan.AUTO):
+        if state == DictEntries.FAN_MODE:
             # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
             # Any change will take one or two separate commands:
             # PART 2 -
             #
+            # To AUTO:
+            # 2. turn off FLAME_EFFECT
+            if value == Fan.AUTO:
+                command = CommandID.FLAME_EFFECT_OFF
+                            
             # To FAN_BOOST:
-            # 1. If currently FLAME_EFFECT, turn off FLAME_EFFECT
             # 2. Turn on FAN_BOOST
-            if value == Fan.FAN_BOOST:
+            elif value == Fan.FAN_BOOST:
                 command = CommandID.FAN_BOOST_ON
 
             # To FLAME_EFFECT:
-            # 1. If currently FAN_BOOST, turn off FAN_BOOST
             # 2. Turn on FLAME_EFFECT
             else:
                 command = CommandID.FLAME_EFFECT_ON
 
             valid_response = False
             try:
-                async with self._sending_lock:
+                async with self._discovery._sending_lock:
                     responses = await self._datagram.send_command(command, value)
                 if (len(responses) > 0) \
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
                         # No / invalid response
                         valid_response = True
+                        print('uid: '+str(self.device_uid)+ ' SENT: ' + str(command))                        
             except ConnectionError:
                 pass
             if valid_response:

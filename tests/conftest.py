@@ -5,12 +5,49 @@ from asyncio import Event, sleep
 from asyncio.transports import DatagramTransport
 from async_timeout import timeout
 
-from pescea.datagram import REQUEST_TIMEOUT
+import pescea.datagram
 from pescea.message import FireplaceMessage, CommandID, ResponseID, expected_response
 
-from .resources import test_fireplaces
+def get_test_fireplaces():
+    """Fixture to return a set of fireplaces to test with"""
+    return {
+        1111: {
+            'IPAddress': '8.8.8.8',
+            'HasNewTimers': False,
+            'FireIsOn': False,
+            'FanBoost': False,
+            'FlameEffect': False,
+            'DesiredTemp': 19.0,
+            'CurrentTemp': 16.0,
+            'Responsive': True
+        },
+        2222: {
+            'IPAddress': '8.8.4.4',
+            'HasNewTimers': False,
+            'FireIsOn': True,
+            'FanBoost': False,
+            'FlameEffect': True,
+            'DesiredTemp': 24.0,
+            'CurrentTemp': 22.0,
+            'Responsive': True
+        },
+        33333: {
+            'IPAddress': '8.8.8.4',
+            'HasNewTimers': True,
+            'FireIsOn': False,
+            'FanBoost': True,
+            'FlameEffect': False,
+            'DesiredTemp': 20.0,
+            'CurrentTemp': 20.0,
+            'Responsive': True
+        }
+    }
 
-fireplaces = test_fireplaces()
+fireplaces = get_test_fireplaces()
+
+def reset_fireplaces():
+    global fireplaces
+    fireplaces = get_test_fireplaces()
 
 _LOG = logging.getLogger('tests.conftest')  # type: logging.Logger
 
@@ -38,7 +75,8 @@ class PatchedDatagramTransport(DatagramTransport):
         # Prepare responses (broadcast, with multiple responses)
         if self.command.command_id == CommandID.SEARCH_FOR_FIRES:
             for uid in fireplaces:
-                self.responses.append((FireplaceMessage.mock_response(response_id= ResponseID.I_AM_A_FIRE, uid=uid), fireplaces[uid]['IPAddress']))
+                if fireplaces[uid]['Responsive']:
+                    self.responses.append((FireplaceMessage.mock_response(response_id= ResponseID.I_AM_A_FIRE, uid=uid), fireplaces[uid]['IPAddress']))
 
         elif self.uid !=0:
             
@@ -100,12 +138,13 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
         The other protocol methods are implemented in PatchedDatagramProtocol above
     """
 
-    # Have we been asked to generate an exception?
-    if raise_exception is not None:
-        if raise_exception is TimeoutError:
-           await sleep(2*REQUEST_TIMEOUT) # exceed the timeout in request
-        else:
+    if (raise_exception is not None) or (transport.uid == 0 and not broadcast):
+        # simulate an exception condition
+        if raise_exception is not TimeoutError:
+            # simulate exception through the protocol
             protocol.error_received(raise_exception)
+        else:
+           await sleep(1.2*pescea.datagram.REQUEST_TIMEOUT) # exceed the timeout in request
 
     else:
         protocol.connection_made(transport)
@@ -125,7 +164,7 @@ async def simulate_comms(transport, protocol, broadcast : bool = False, raise_ex
                     else:
                         protocol.datagram_received(next_response, addr)
 
-    protocol.connection_lost(None)
+    protocol.connection_lost(raise_exception)
 
 async def simulate_comms_patchable(transport, protocol, broadcast):
     """ Generic pattern, overwritten by tests to generate different results"""
@@ -135,8 +174,7 @@ async def simulate_comms_timeout_error(transport, protocol, broadcast):
     await simulate_comms(transport, protocol, broadcast, raise_exception = TimeoutError)
 
 async def simulate_comms_connection_error(transport, protocol, broadcast):
-    async with timeout(3*REQUEST_TIMEOUT):
-        await simulate_comms(transport, protocol, broadcast, raise_exception = ConnectionError)
+    await simulate_comms(transport, protocol, broadcast, raise_exception = ConnectionError)
 
 async def patched_create_datagram_endpoint(
         self, protocol_factory,

@@ -6,9 +6,9 @@ from pytest import mark
 from pprint import PrettyPrinter
 
 from pescea.controller import Fan, ControllerState
-from pescea.discovery import Listener, discovery
+from pescea.discovery import Listener, discovery_service
 
-from .conftest import fireplaces, patched_create_datagram_endpoint
+from .conftest import fireplaces, patched_create_datagram_endpoint, reset_fireplaces
 
 @mark.asyncio
 async def test_full_stack(mocker):
@@ -24,7 +24,7 @@ async def test_full_stack(mocker):
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.3)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.5)
 
-    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.5)
 
     discoveries = Semaphore(value=0)
     disconnections = Semaphore(value=0)
@@ -32,10 +32,13 @@ async def test_full_stack(mocker):
 
     controllers = []
 
+    for f in fireplaces:
+        fireplaces[f]['Responsive'] = True
+
     class TestListener(Listener):
-        def controller_discovered(self, _ctrl):
-            print('Controller discovered: {0}'.format(_ctrl.device_uid))            
-            controllers.append(_ctrl)
+        def controller_discovered(self, ctrl):
+            print('Controller discovered: {0}'.format(ctrl.device_uid))            
+            controllers.append(ctrl)
             discoveries.release()
 
         def controller_disconnected(self, ctrl, ex):
@@ -48,34 +51,38 @@ async def test_full_stack(mocker):
 
     listener = TestListener()
 
-    async with discovery(listener):
+    async with discovery_service(listener):
 
         # Expect controller discovered calls, for each fireplace
 
         for _ in fireplaces:
             await discoveries.acquire()
 
-        # test setting values
-        ctrl = controllers[0] # Type: Controller[]
+        for ctrl in controllers:
 
-        await ctrl.set_on(True)
-        await sleep(0.5)
-        assert ctrl.is_on
-
-        for fan in Fan:
-            await ctrl.set_fan(fan)
-            assert ctrl.fan == fan
             assert ctrl.state == ControllerState.READY
 
-        fireplaces[ctrl.device_uid]['Responsive'] = False
+            # test toggling power
+            new_on = not ctrl.is_on
+            await ctrl.set_on(new_on)
+            await sleep(0.05)
+            assert ctrl.state == ControllerState.BUSY
+            await sleep(0.3)
+            assert ctrl.state == ControllerState.READY
+            assert ctrl.is_on == new_on
 
-        await disconnections.acquire()
-        assert ctrl.state == ControllerState.DISCONNECTED
+            await ctrl.set_fan(Fan.AUTO)
+            assert ctrl.fan == Fan.AUTO
 
-        new_ip = '10.10.10.10'
-        fireplaces[ctrl.device_uid]['IPAddress'] = new_ip
-        fireplaces[ctrl.device_uid]['Responsive'] = True
-        
-        await reconnections.acquire()
-        assert ctrl.state == ControllerState.READY
-        assert ctrl.device_ip == new_ip
+            fireplaces[ctrl.device_uid]['Responsive'] = False
+
+            await disconnections.acquire()
+            assert ctrl.state == ControllerState.DISCONNECTED
+
+            new_ip = '10.10.10.'+str(ctrl.device_uid % 256)
+            fireplaces[ctrl.device_uid]['IPAddress'] = new_ip
+            fireplaces[ctrl.device_uid]['Responsive'] = True
+            
+            await reconnections.acquire()
+            assert ctrl.state == ControllerState.READY
+            assert ctrl.device_ip == new_ip
