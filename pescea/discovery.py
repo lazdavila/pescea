@@ -129,16 +129,17 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self._disconnected_uids = set()  # type: Set[str]
         self._listeners = []  # type: List[Listener]
         self._close_task = None  # type: Optional[Task]
-        self._sending_lock = Lock()
+
 
         _LOG.info('Starting discovery protocol')
         if not loop:
             self.loop = asyncio.get_event_loop()
         else:
             self.loop = loop
+        self.sending_lock = Lock(loop=self.loop)
 
         self._broadcast_ip = ip_addr
-        self._datagram = FireplaceDatagram(self.loop, ip_addr)
+        self._datagram = FireplaceDatagram(self.loop, ip_addr, self.sending_lock)
 
         self._discovery_started = False
         self._scan_condition = Condition(loop=self.loop)  # type: Condition
@@ -245,8 +246,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     async def _send_broadcast(self):
         _LOG.debug('Sending discovery message to addr %s', self._broadcast_ip)
         try:
-            async with self._sending_lock:
-                responses = await self._datagram.send_command(
+            responses = await self._datagram.send_command(
                 CommandID.SEARCH_FOR_FIRES, broadcast=True)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
@@ -330,7 +330,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
 def discovery_service(*listeners: Listener,
               loop: AbstractEventLoop = None,
-              ip_addr: str = None) -> AbstractDiscoveryService:
+              ip_addr: str = BROADCAST_IP_ADDR) -> AbstractDiscoveryService:
     """Create discovery service. Returned object is an asynchronous
     context manager so can be used with 'async with' statement.
     Alternately call start_discovery or start_discovery_async to commence

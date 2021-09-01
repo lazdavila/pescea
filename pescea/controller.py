@@ -105,7 +105,7 @@ class Controller:
         self._system_settings[DictEntries.IP_ADDRESS] = device_ip
         self._system_settings[DictEntries.DEVICE_UID] = device_uid
 
-        self._datagram = FireplaceDatagram(self._discovery.loop, device_ip)
+        self._datagram = FireplaceDatagram(self._discovery.loop, device_ip, self._discovery.sending_lock)
 
         self._loop_interrupt_condition = asyncio.Condition(loop=self._discovery.loop)
 
@@ -340,8 +340,7 @@ class Controller:
 
     async def _request_status(self) -> FireplaceMessage:
         try:
-            async with self._discovery._sending_lock:
-                responses = await self._datagram.send_command(CommandID.STATUS_PLEASE)
+            responses = await self._datagram.send_command(CommandID.STATUS_PLEASE)
             if (len(responses) > 0):
                 this_response = next(iter(responses)) # only expecting one
                 if responses[this_response].response_id == expected_response(CommandID.STATUS_PLEASE):
@@ -430,8 +429,7 @@ class Controller:
         if command is not None:
             valid_response = False
             try:
-                async with self._discovery._sending_lock:
-                    responses = await self._datagram.send_command(command, value)
+                responses = await self._datagram.send_command(command, value)
                 if (len(responses) > 0) \
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
                         # No / invalid response
@@ -469,8 +467,7 @@ class Controller:
 
             valid_response = False
             try:
-                async with self._discovery._sending_lock:
-                    responses = await self._datagram.send_command(command, value)
+                responses = await self._datagram.send_command(command, value)
                 if (len(responses) > 0) \
                     and (responses[next(iter(responses))].response_id == expected_response(command)):
                         # No / invalid response

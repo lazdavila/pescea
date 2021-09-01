@@ -5,9 +5,12 @@
 
 import asyncio
 import sys
+import socket
 
-from asyncio import  Future, DatagramTransport
+from asyncio import Lock
 from asyncio.base_events import BaseEventLoop
+
+from .udp_endpoints import open_local_endpoint, open_remote_endpoint
 
 from async_timeout import timeout
 from typing import Any, Dict
@@ -22,14 +25,14 @@ _LOG = logging.getLogger('pescea.datagram')
 CONTROLLER_PORT = 3300
 
 # Time to wait for results from server
-REQUEST_TIMEOUT = 6
+REQUEST_TIMEOUT = 20
 
 MultipleResponses = Dict[str, FireplaceMessage]
 
 class FireplaceDatagram:
     """ Send UDP Datagrams to fireplace and receive responses """
 
-    def __init__(self, event_loop: BaseEventLoop, device_ip: str) -> None:
+    def __init__(self, event_loop: BaseEventLoop, device_ip: str, sending_lock: Lock = None) -> None:
         """Create a simple datagram client interface.
 
         Args:
@@ -42,8 +45,11 @@ class FireplaceDatagram:
         """
         self._ip = device_ip
         self._event_loop = event_loop
-
         self._fail_exception = None
+        if sending_lock is None:
+            self.sending_lock = Lock(loop=event_loop)
+        else:
+            self.sending_lock = sending_lock
 
     @property
     def ip(self) -> str:
@@ -64,59 +70,47 @@ class FireplaceDatagram:
         """
         loop = self._event_loop
         on_complete = loop.create_future()
-        device_ip = self._ip
 
         message = FireplaceMessage(command=command, set_temp=data)
 
         responses = dict()   # type: MultipleResponses
 
-        class _DatagramProtocol:
-            def __init__(self, message : FireplaceMessage, on_complete: Future):
-                self._message = message
-                self._on_complete = on_complete
-                self._transport = None
+        async def receive_responses():
+            exc = True
+            local = await open_local_endpoint(port=CONTROLLER_PORT, loop=loop)  
+            try:
+                async with timeout(REQUEST_TIMEOUT):
+                    while True:
+                        data, addr = await local.receive()
+                        response = FireplaceMessage(incoming=data)
+                        if response.response_id != expected_response(command):
+                            _LOG.error(
+                                'Message response id: %s does not match command id: %s',
+                                response.response_id, command)
+                        responses[addr] = response
+                        if command != CommandID.SEARCH_FOR_FIRES:
+                            break
+            except asyncio.TimeoutError as ex:
+                exc = ex
+            local.close()
+            on_complete.set_result(exc)
 
-            def connection_made(self, transport: DatagramTransport):
-                self._transport = transport
-                self._transport.sendto(self._message.bytearray_)
+        # set up receiver before we send anything
+        async with self.sending_lock:
+            try:
+                loop.call_soon(receive_responses())
+                # send the UDP
+                remote = await open_remote_endpoint(self._ip, CONTROLLER_PORT, loop=loop, allow_broadcast=broadcast)
+                remote.send(message.bytearray_)      
+                remote.close()
+                async with timeout(REQUEST_TIMEOUT):
+                    await on_complete
+            except asyncio.TimeoutError:
+                pass
 
-            def datagram_received(self, data, addr):
-                response = FireplaceMessage(incoming=data)
-                if response.response_id != expected_response(self._message.command_id):
-                    _LOG.error(
-                        'Message response id: %s does not match command id: %s',
-                        response.response_id, self._message.command_id)
-                responses[addr] = response
-                if command != CommandID.SEARCH_FOR_FIRES:
-                    self._transport.close()
+        on_complete.result()
 
-            def error_received(self, exc):
-                _LOG.warning(
-                    'Error sending command=%s failed with exception: %s',
-                    self._message.command_id, str(exc))
+        if len(responses) == 0:
+            raise ConnectionError('Unable to send/receive UDP message')
 
-            def connection_lost(self, exc):
-                self._on_complete.set_result(exc)
-
-        try:
-            async with timeout(REQUEST_TIMEOUT) as cm:
-                transport, _ = await loop.create_datagram_endpoint(
-                    lambda: _DatagramProtocol(message, on_complete),
-                    remote_addr=(device_ip, CONTROLLER_PORT),
-                    allow_broadcast=broadcast)
-
-                # wait for response to be received.
-                await on_complete
-
-            if cm.expired:
-                if transport:
-                    transport.close()                
-                raise TimeoutError()
-
-            # This raises any exception in Protocol (or if has no result)
-            on_complete.result()
-
-            return responses
-        except:
-            exc = sys.exc_info()[0]
-            raise ConnectionError('Unable to send UDP: ' + str(exc))
+        return responses
