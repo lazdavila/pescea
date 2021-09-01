@@ -55,7 +55,7 @@ class ResponseID(Enum):
     STATUS = 0x80
     POWER_ON_ACK = 0x8d
     POWER_OFF_ACK = 0x8f
-    FAN_BOOST_ON_ACK = 0x8a
+    FAN_BOOST_ON_ACK = 0x89
     FAN_BOOST_OFF_ACK = 0x8b
     FLAME_EFFECT_ON_ACK = 0x61
     FLAME_EFFECT_OFF_ACK = 0x60

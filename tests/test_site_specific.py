@@ -9,8 +9,14 @@ from pescea.controller import Controller, Fan, ControllerState
 from pescea.discovery import Listener, discovery_service
 
 @mark.asyncio
-async def test_site_specific():
+async def test_site_specific(mocker):
     """Will only work on networks with real fireplaces"""
+
+    # speed up the test a bit:
+
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 2.0)
+    mocker.patch('pescea.controller.REFRESH_INTERVAL', 10.0)
+    mocker.patch('pescea.controller.NOTIFY_REFRESH_INTERVAL', 15.0)
 
     class TestListener(Listener):
 
@@ -69,9 +75,75 @@ async def test_site_specific():
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
-
+            # only play with an 'off' fireplace for testing
+            await ctrl.set_on(True)
+            # wait to start up
+            await sleep(2*60)
 
             # test still updating
+            await listener.updates[uid].acquire()
+            while not listener.updates[uid].locked():
+                await listener.updates[uid].acquire()
+
+            assert ctrl.is_on
+
+            for fan in Fan:
+                await ctrl.set_fan(fan)
+
+                await sleep(10.0)
+                # test still updating
+                await listener.updates[uid].acquire()
+                while not listener.updates[uid].locked():
+                    await listener.updates[uid].acquire()
+
+                assert ctrl.fan == fan         
+
+            await ctrl.set_desired_temp(ctrl.min_temp)
+
+            await sleep(10.0)
+            # test still updating
+            await listener.updates[uid].acquire()
+            while not listener.updates[uid].locked():
+                await listener.updates[uid].acquire()
+
+            assert int(ctrl.desired_temp) == int(ctrl.min_temp)     
+
+            await ctrl.set_desired_temp(ctrl.max_temp)
+
+            await sleep(10.0)
+            # test still updating
+            await listener.updates[uid].acquire()
+            while not listener.updates[uid].locked():
+                await listener.updates[uid].acquire()
+
+            assert int(ctrl.desired_temp) == int(ctrl.max_temp)    
+
+            # reset to reasonable values and turn off
+
+            await ctrl.set_fan(Fan.AUTO)
+
+            await sleep(10.0)
+
+            await listener.updates[uid].acquire()
+            while not listener.updates[uid].locked():
+                await listener.updates[uid].acquire()
+
+            assert ctrl.fan == Fan.AUTO  
+       
+            await ctrl.set_desired_temp(20.0)
+
+            await sleep(10.0)
+
+            await listener.updates[uid].acquire()
+            while not listener.updates[uid].locked():
+                await listener.updates[uid].acquire()
+
+            assert int(ctrl.desired_temp) == 20               
+
+            await ctrl.set_on(False)
+
+            await sleep(10.0)
+            
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()

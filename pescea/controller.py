@@ -22,6 +22,9 @@ REQUEST_TIMEOUT = 5
 #  - nothing changes quickly with fireplaces
 REFRESH_INTERVAL = 30.0
 
+# Seconds to wait between discovery notifications (if no change)
+NOTIFY_REFRESH_INTERVAL = 5*60.0
+
 # Retry rate when first get disconnected
 RETRY_INTERVAL = 10.0
 
@@ -29,7 +32,7 @@ RETRY_INTERVAL = 10.0
 RETRY_TIMEOUT = 60.0
 
 # Time to wait when have been disconnected longer than RETRY_TIMOUT
-DISCONNECTED_INTERVAL = 300.0
+DISCONNECTED_INTERVAL = 5*60.0
 
 # Time to wait for fireplace to start up / shut down
 # - Commands are stored, but not sent to the fireplace until it has settled
@@ -120,6 +123,7 @@ class Controller:
         self._state = ControllerState.READY
         self._last_response = 0.0 # Used to track last valid message received
         self._busy_end_time = 0.0 # Used to track when exit BUSY state
+        self._last_notify = 0.0 # Used to rate limit the notifications to discovery
 
         # Use to exit poll_loop when told to
         self._closed = False
@@ -289,9 +293,10 @@ class Controller:
             # We have a valid response - the controller is communicating
 
             # These values are readonly, so copy them in any case
+            prior_settings = self._system_settings
             self._system_settings[DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
             self._system_settings[DictEntries.CURRENT_TEMP]   = response.current_temp
-
+            
             if prior_state == ControllerState.READY:
 
                 # Normal operation, update our internal values
@@ -305,7 +310,15 @@ class Controller:
                 self._system_settings[DictEntries.FIRE_IS_ON]     = response.fire_is_on
 
                 if notify:
-                    self._discovery.controller_update(self)
+                    changes_found = False
+                    for entry in prior_settings:
+                        if prior_settings[entry] != self._system_settings[entry]:
+                            changes_found = True
+                            break
+                    if changes_found \
+                            or (time() - self._last_notify > NOTIFY_REFRESH_INTERVAL):
+                        self._last_notify = time()
+                        self._discovery.controller_update(self)
 
             else:
 

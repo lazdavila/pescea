@@ -25,7 +25,7 @@ _LOG = logging.getLogger('pescea.datagram')
 CONTROLLER_PORT = 3300
 
 # Time to wait for results from server
-REQUEST_TIMEOUT = 4
+REQUEST_TIMEOUT = 5
 
 MultipleResponses = Dict[str, FireplaceMessage]
 
