@@ -16,7 +16,7 @@ from async_timeout import timeout
 from typing import Any, Dict
 
 # Pescea imports:
-from .message import FireplaceMessage, CommandID, expected_response
+from .message import FireplaceMessage, CommandID, ResponseID, expected_response
 
 import logging
 _LOG = logging.getLogger('pescea.datagram')
@@ -25,7 +25,7 @@ _LOG = logging.getLogger('pescea.datagram')
 CONTROLLER_PORT = 3300
 
 # Time to wait for results from server
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 4
 
 MultipleResponses = Dict[str, FireplaceMessage]
 
@@ -69,46 +69,38 @@ class FireplaceDatagram:
             Raises ConnectionError if unable to send command
         """
         loop = self._event_loop
-        on_complete = loop.create_future()
-
         message = FireplaceMessage(command=command, set_temp=data)
-
         responses = dict()   # type: MultipleResponses
-
-        async def receive_responses():
-            exc = True
-            local = await open_local_endpoint(port=CONTROLLER_PORT, loop=loop)  
-            try:
-                async with timeout(REQUEST_TIMEOUT):
-                    while True:
-                        data, addr = await local.receive()
-                        response = FireplaceMessage(incoming=data)
-                        if response.response_id != expected_response(command):
-                            _LOG.error(
-                                'Message response id: %s does not match command id: %s',
-                                response.response_id, command)
-                        responses[addr] = response
-                        if command != CommandID.SEARCH_FOR_FIRES:
-                            break
-            except asyncio.TimeoutError as ex:
-                exc = ex
-            local.close()
-            on_complete.set_result(exc)
 
         # set up receiver before we send anything
         async with self.sending_lock:
             try:
-                loop.call_soon(receive_responses())
-                # send the UDP
+                local = await open_local_endpoint('0.0.0.0', CONTROLLER_PORT, loop=loop, allow_broadcast=broadcast)  
                 remote = await open_remote_endpoint(self._ip, CONTROLLER_PORT, loop=loop, allow_broadcast=broadcast)
                 remote.send(message.bytearray_)      
                 remote.close()
                 async with timeout(REQUEST_TIMEOUT):
-                    await on_complete
+                    while True:
+
+                        data, (addr, _) = await local.receive()
+                        response = FireplaceMessage(incoming=data)
+                        if response.is_command:
+                            if not broadcast:
+                                _LOG.error(
+                                    'Unexpected command id: %s',
+                                    response.command_id)
+                        else: # response
+                            if response.response_id != expected_response(command):
+                                _LOG.debug(
+                                    'Message response id: %s does not match command id: %s',
+                                    response.response_id, command)
+                            else:
+                                responses[addr] = response
+                        if command != CommandID.SEARCH_FOR_FIRES:
+                            break
             except asyncio.TimeoutError:
                 pass
-
-        on_complete.result()
+            local.close()
 
         if len(responses) == 0:
             raise ConnectionError('Unable to send/receive UDP message')

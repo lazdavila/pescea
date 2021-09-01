@@ -60,7 +60,7 @@ class ResponseID(Enum):
     FLAME_EFFECT_ON_ACK = 0x61
     FLAME_EFFECT_OFF_ACK = 0x60
     NEW_SET_TEMP_ACK = 0x66
-    I_AM_A_FIRE = 0x99
+    I_AM_A_FIRE = 0x90
 
 # Acceptable limits when commanding NEW_SET_TEMP:
 MIN_SET_TEMP = 4
@@ -183,14 +183,15 @@ class FireplaceMessage:
             for i in range(MSG_OFFSET_ID, MSG_OFFSET_DATA_END):
                 self._crc_sum += incoming[i]
 
-            self._crc_sum = self._crc_sum % 255
+            self._crc_sum = self._crc_sum % 256
             if self._crc_sum != incoming[MSG_OFFSET_CRC]:
                 raise ValueError('Message:'+incoming.hex()
                     +' Has Invalid CRC: {0}'.format(incoming[MSG_OFFSET_CRC]) 
                     +' Expecting: {0}'.format(self._crc_sum))
 
             # Normal use: Decode incoming responses from fireplace:
-            if incoming[MSG_OFFSET_ID] in ResponseID._value2member_map_:
+            id_value = incoming[MSG_OFFSET_ID]
+            if id_value in ResponseID._value2member_map_:
 
                 self._is_command = False
                 self._id = ResponseID(incoming[MSG_OFFSET_ID])
@@ -216,8 +217,8 @@ class FireplaceMessage:
 
                 elif (self._id) == ResponseID.I_AM_A_FIRE:
                     if incoming[MSG_OFFSET_DATA_LENGTH] != 6:
-                        raise ValueError('Message:'+incoming.hex()+' Has Invalid Data Length:' +
-                                        incoming[MSG_OFFSET_DATA_LENGTH] + ' Expecting:' + 6)
+                        _LOG.debug('Message: %s Has Invalid Data Length: %s (expecting 6)',
+                                incoming.hex(), str(incoming[MSG_OFFSET_DATA_LENGTH]))
                     self._serial = int.from_bytes(
                         incoming[MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL:MSG_OFFSET_DATA_START+DATA_OFFSET_SERIAL+4], byteorder='big', signed=False)
                     self._pin = int.from_bytes(
@@ -252,6 +253,14 @@ class FireplaceMessage:
         else:
             raise(ValueError,'Invalid constructor')
 
+    @property
+    def is_command(self) -> bool:
+        return self._is_command
+
+    @property
+    def is_response(self) -> bool:
+        return not self._is_command
+        
     @property
     def command_id(self) -> CommandID:
         if self._is_command:
