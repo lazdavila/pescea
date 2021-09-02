@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Dict, Union
 from time import time
 from async_timeout import timeout
+from copy import deepcopy
 
 # Pescea imports:
 from pescea.message import FireplaceMessage, CommandID, ResponseID, MIN_SET_TEMP, MAX_SET_TEMP, expected_response
@@ -36,7 +37,8 @@ DISCONNECTED_INTERVAL = 5*60.0
 
 # Time to wait for fireplace to start up / shut down
 # - Commands are stored, but not sent to the fireplace until it has settled
-ON_OFF_BUSY_WAIT_TIME = 120
+# Disclaimer: This was measured from Escea remote display
+ON_OFF_BUSY_WAIT_TIME = 66
 
 class ControllerState(Enum):
     """ Controller states:
@@ -105,6 +107,7 @@ class Controller:
         """
         self._discovery = discovery
         self._system_settings = {}  # type: Controller.ControllerData
+        self._prior_settings = {} # type: Controller.ControllerData        
         self._system_settings[DictEntries.IP_ADDRESS] = device_ip
         self._system_settings[DictEntries.DEVICE_UID] = device_uid
 
@@ -123,7 +126,7 @@ class Controller:
         self._state = ControllerState.READY
         self._last_response = 0.0 # Used to track last valid message received
         self._busy_end_time = 0.0 # Used to track when exit BUSY state
-        self._last_notify = 0.0 # Used to rate limit the notifications to discovery
+        self._last_update = 0.0 # Used to rate limit the notifications to discovery
 
         # Use to exit poll_loop when told to
         self._closed = False
@@ -292,11 +295,12 @@ class Controller:
         if (response is not None) and (response.response_id == ResponseID.STATUS):
             # We have a valid response - the controller is communicating
 
+            self._state = ControllerState.READY
+
             # These values are readonly, so copy them in any case
-            prior_settings = self._system_settings
             self._system_settings[DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
             self._system_settings[DictEntries.CURRENT_TEMP]   = response.current_temp
-            
+
             if prior_state == ControllerState.READY:
 
                 # Normal operation, update our internal values
@@ -309,39 +313,44 @@ class Controller:
                     self._system_settings[DictEntries.FAN_MODE]   = Fan.AUTO
                 self._system_settings[DictEntries.FIRE_IS_ON]     = response.fire_is_on
 
-                if notify:
-                    changes_found = False
-                    for entry in prior_settings:
-                        if prior_settings[entry] != self._system_settings[entry]:
-                            changes_found = True
-                            break
-                    if changes_found \
-                            or (time() - self._last_notify > NOTIFY_REFRESH_INTERVAL):
-                        self._last_notify = time()
-                        self._discovery.controller_update(self)
-
             else:
 
                 # We have come back to READY state.
                 # We need to try to sync the fireplace settings with our internal copies
 
+
                 if response.desired_temp != self._system_settings[DictEntries.DESIRED_TEMP]:
                     await self._set_system_state(DictEntries.DESIRED_TEMP, self._system_settings[DictEntries.DESIRED_TEMP], sync=True)
 
-                if (response.fan_boost_is_on != (self._system_settings[DictEntries.FAN_MODE] == Fan.FAN_BOOST)) \
-                        or  (response.flame_effect != (self._system_settings[DictEntries.FAN_MODE] == Fan.FLAME_EFFECT)):
+                if response.fan_boost_is_on:
+                    response_fan = Fan.FAN_BOOST
+                elif response.flame_effect:
+                    response_fan = Fan.FLAME_EFFECT
+                else:
+                    response_fan = Fan.AUTO
+                if response_fan != self._system_settings[DictEntries.FAN_MODE]:
                     await self._set_system_state(DictEntries.FAN_MODE, self._system_settings[DictEntries.FAN_MODE], sync=True)
 
                 # Do power last
                 if response.fire_is_on != self._system_settings[DictEntries.FIRE_IS_ON]:
                     # This will also set the BUSY state
                     await self._set_system_state(DictEntries.FIRE_IS_ON, self._system_settings[DictEntries.FIRE_IS_ON], sync=True )
-                else:
-                    self._state = ControllerState.READY
 
                 if prior_state == ControllerState.DISCONNECTED:
-                    self._discovery.controller_reconnected(self)                    
-
+                    self._discovery.controller_reconnected(self)
+            
+            if notify:
+                changes_found = False
+                for entry in self._system_settings:
+                    if not entry in self._prior_settings \
+                            or (self._prior_settings[entry] != self._system_settings[entry]):
+                        changes_found = True
+                        break
+                if changes_found \
+                        or (time() - self._last_update > NOTIFY_REFRESH_INTERVAL):
+                    self._last_update = time()
+                    self._prior_settings = deepcopy(self._system_settings)
+                    self._discovery.controller_update(self)       
         else:
             # No / invalid response, need to check if we need to change state
             if time() - self._last_response < RETRY_TIMEOUT:
@@ -400,7 +409,7 @@ class Controller:
         # save the new value internally
         self._system_settings[state] = value
 
-        if self._state != ControllerState.READY:
+        if (not sync) and (self._state != ControllerState.READY):
             # We've saved the new value.... just can't send it to the controller yet
             return
 

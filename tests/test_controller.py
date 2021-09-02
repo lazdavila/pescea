@@ -7,14 +7,14 @@ from asyncio import sleep
 from pescea.controller import DISCONNECTED_INTERVAL, REFRESH_INTERVAL, REQUEST_TIMEOUT, Fan, ControllerState, Controller
 from pescea.discovery import DiscoveryService
 
-from .conftest import fireplaces, patched_create_datagram_endpoint
+from .conftest import fireplaces, patched_open_datagram_endpoint
 
 @mark.asyncio
 async def test_controller_basics(mocker):
 
     mocker.patch(
-        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint
+        'pescea.udp_endpoints.open_datagram_endpoint',
+        patched_open_datagram_endpoint
     )
 
     mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
@@ -83,8 +83,8 @@ async def test_controller_basics(mocker):
 async def test_controller_change_address(mocker):
 
     mocker.patch(
-        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint
+        'pescea.udp_endpoints.open_datagram_endpoint',
+        patched_open_datagram_endpoint
     )
     
     mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
@@ -92,6 +92,8 @@ async def test_controller_change_address(mocker):
     mocker.patch('pescea.controller.RETRY_INTERVAL',0.1)
     mocker.patch('pescea.controller.RETRY_TIMEOUT',0.3)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL',0.5)
+
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.3)
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
@@ -109,7 +111,7 @@ async def test_controller_change_address(mocker):
     new_ip = '10.10.10.10'
     fireplaces[device_uid]['IPAddress'] = new_ip
 
-    await sleep(0.6)
+    await sleep(0.8)
     assert controller.state == ControllerState.DISCONNECTED
 
     controller.refresh_address(new_ip)
@@ -128,8 +130,8 @@ async def test_controller_change_address(mocker):
 async def test_controller_poll(mocker):
 
     mocker.patch(
-        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint
+        'pescea.udp_endpoints.open_datagram_endpoint',
+        patched_open_datagram_endpoint
     )
     
     mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
@@ -178,8 +180,8 @@ async def test_controller_poll(mocker):
 async def test_controller_disconnect_reconnect(mocker):
 
     mocker.patch(
-        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint
+        'pescea.udp_endpoints.open_datagram_endpoint',
+        patched_open_datagram_endpoint
     )
     
     mocker.patch('pescea.controller.REQUEST_TIMEOUT', 0.08)   
@@ -187,8 +189,8 @@ async def test_controller_disconnect_reconnect(mocker):
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.2)
-    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.3)
-    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
+    mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.4)
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.1)
 
     discovery = DiscoveryService()
     device_uid = list(fireplaces.keys())[0]
@@ -201,7 +203,7 @@ async def test_controller_disconnect_reconnect(mocker):
 
     fireplaces[device_uid]['Responsive'] = False
 
-    await sleep(0.1)
+    await sleep(0.2)
     assert controller.state == ControllerState.NON_RESPONSIVE
 
     await sleep(0.3)

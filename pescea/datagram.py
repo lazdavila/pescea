@@ -32,7 +32,7 @@ MultipleResponses = Dict[str, FireplaceMessage]
 class FireplaceDatagram:
     """ Send UDP Datagrams to fireplace and receive responses """
 
-    def __init__(self, event_loop: BaseEventLoop, device_ip: str, sending_lock: Lock = None) -> None:
+    def __init__(self, event_loop: BaseEventLoop, device_ip: str, sending_lock: Lock) -> None:
         """Create a simple datagram client interface.
 
         Args:
@@ -46,10 +46,7 @@ class FireplaceDatagram:
         self._ip = device_ip
         self._event_loop = event_loop
         self._fail_exception = None
-        if sending_lock is None:
-            self.sending_lock = Lock(loop=event_loop)
-        else:
-            self.sending_lock = sending_lock
+        self.sending_lock = sending_lock
 
     @property
     def ip(self) -> str:
@@ -68,15 +65,14 @@ class FireplaceDatagram:
 
             Raises ConnectionError if unable to send command
         """
-        loop = self._event_loop
         message = FireplaceMessage(command=command, set_temp=data)
         responses = dict()   # type: MultipleResponses
 
         # set up receiver before we send anything
         async with self.sending_lock:
             try:
-                local = await open_local_endpoint('0.0.0.0', CONTROLLER_PORT, loop=loop, allow_broadcast=broadcast)  
-                remote = await open_remote_endpoint(self._ip, CONTROLLER_PORT, loop=loop, allow_broadcast=broadcast)
+                local = await open_local_endpoint('0.0.0.0', CONTROLLER_PORT, loop=self._event_loop, allow_broadcast=broadcast)  
+                remote = await open_remote_endpoint(self._ip, CONTROLLER_PORT, loop=self._event_loop, allow_broadcast=broadcast)
                 remote.send(message.bytearray_)      
                 remote.close()
                 async with timeout(REQUEST_TIMEOUT):

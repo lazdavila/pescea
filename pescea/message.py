@@ -149,7 +149,7 @@ class FireplaceMessage:
             self._crc_sum = 0
             for i in range(MSG_OFFSET_ID, MSG_OFFSET_DATA_END):
                 self._crc_sum += self._bytearray[i]
-            self._crc_sum = self._crc_sum % 255
+            self._crc_sum = self._crc_sum % 256
             self._bytearray[MSG_OFFSET_CRC] = self._crc_sum
 
         elif incoming is not None:
@@ -384,7 +384,7 @@ class FireplaceMessage:
             crc_sum = 0
             for i in range(MSG_OFFSET_ID, MSG_OFFSET_DATA_END):
                 crc_sum += message[i]
-            crc_sum = crc_sum % 255
+            crc_sum = crc_sum % 256
             message[MSG_OFFSET_CRC] = crc_sum
 
         return message

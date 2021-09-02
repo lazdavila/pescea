@@ -7,24 +7,26 @@ from pytest import mark
 from pescea.controller import Controller, Fan, ControllerState
 from pescea.discovery import Listener, discovery_service
 
-from .conftest import fireplaces, patched_create_datagram_endpoint, reset_fireplaces
+from .conftest import fireplaces, patched_open_datagram_endpoint
 
 @mark.asyncio
 async def test_full_stack(mocker):
 
 
     mocker.patch(
-        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint
+        'pescea.udp_endpoints.open_datagram_endpoint',
+        patched_open_datagram_endpoint
     )
 
-    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
+    mocker.patch('pescea.discovery.DISCOVERY_SLEEP', 0.4)
+    mocker.patch('pescea.discovery.DISCOVERY_RESCAN', 0.2)
+    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.5)
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.3)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.5)
-
-    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.5)
+    mocker.patch('pescea.controller.NOTIFY_REFRESH_INTERVAL', 0.3)    
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
 
     for f in fireplaces:
         fireplaces[f]['Responsive'] = True
@@ -91,7 +93,7 @@ async def test_full_stack(mocker):
                 await listener.updates[uid].acquire()
 
             assert ctrl.state == ControllerState.BUSY
-            await sleep(0.5)
+            await sleep(0.6)
             
             assert ctrl.state == ControllerState.READY
             assert ctrl.is_on == new_on
@@ -113,7 +115,7 @@ async def test_full_stack(mocker):
 
             # test fireplace non-responsive
             fireplaces[ctrl.device_uid]['Responsive'] = False
-
+            await sleep(0.3)
             # check not getting any more updates
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
@@ -138,15 +140,20 @@ async def test_full_stack(mocker):
 async def test_multiple_listeners(mocker):
 
     mocker.patch(
-        'pescea.datagram.asyncio.BaseEventLoop.create_datagram_endpoint',
-        patched_create_datagram_endpoint
+        'pescea.udp_endpoints.open_datagram_endpoint',
+        patched_open_datagram_endpoint
     )
 
-    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.2)
+    mocker.patch('pescea.discovery.DISCOVERY_SLEEP', 0.4)
+    mocker.patch('pescea.discovery.DISCOVERY_RESCAN', 0.2)
+    mocker.patch('pescea.controller.ON_OFF_BUSY_WAIT_TIME', 0.5)
     mocker.patch('pescea.controller.REFRESH_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_INTERVAL', 0.1)
     mocker.patch('pescea.controller.RETRY_TIMEOUT', 0.3)
     mocker.patch('pescea.controller.DISCONNECTED_INTERVAL', 0.5)
+    mocker.patch('pescea.controller.NOTIFY_REFRESH_INTERVAL', 0.3)    
+    mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.2)
+
 
     mocker.patch('pescea.datagram.REQUEST_TIMEOUT', 0.5)
 

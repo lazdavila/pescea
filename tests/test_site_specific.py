@@ -1,13 +1,14 @@
-"""Test Escea site specific configuration """
+"""Test Escea connected to local network (skip unless have one available) """
 
 import pytest
 from asyncio import Semaphore, sleep
 from pytest import mark
 from pprint import PrettyPrinter
 
-from pescea.controller import Controller, Fan, ControllerState
+from pescea.controller import Controller, Fan, ControllerState, ON_OFF_BUSY_WAIT_TIME
 from pescea.discovery import Listener, discovery_service
 
+@mark.skip
 @mark.asyncio
 async def test_site_specific(mocker):
     """Will only work on networks with real fireplaces"""
@@ -75,10 +76,11 @@ async def test_site_specific(mocker):
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
+            print('Requesting Turn On')
             # only play with an 'off' fireplace for testing
             await ctrl.set_on(True)
             # wait to start up
-            await sleep(2*60)
+            await sleep(ON_OFF_BUSY_WAIT_TIME)
 
             # test still updating
             await listener.updates[uid].acquire()
@@ -88,30 +90,27 @@ async def test_site_specific(mocker):
             assert ctrl.is_on
 
             for fan in Fan:
+                print('Requesting set Fan to: '+ str(fan))
                 await ctrl.set_fan(fan)
-
-                await sleep(10.0)
-                # test still updating
+                await sleep(2.0)
                 await listener.updates[uid].acquire()
                 while not listener.updates[uid].locked():
                     await listener.updates[uid].acquire()
 
                 assert ctrl.fan == fan         
 
+            print('Requesting desired temperature of: '+ str(ctrl.min_temp))
             await ctrl.set_desired_temp(ctrl.min_temp)
-
-            await sleep(10.0)
-            # test still updating
+            await sleep(2.0)
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
             assert int(ctrl.desired_temp) == int(ctrl.min_temp)     
 
+            print('Requesting desired temperature of: '+ str(ctrl.max_temp))
             await ctrl.set_desired_temp(ctrl.max_temp)
-
-            await sleep(10.0)
-            # test still updating
+            await sleep(2.0)
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
@@ -120,30 +119,29 @@ async def test_site_specific(mocker):
 
             # reset to reasonable values and turn off
 
+            print('Requesting set Fan to: AUTO')
             await ctrl.set_fan(Fan.AUTO)
-
-            await sleep(10.0)
-
+            await sleep(2.0)
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
             assert ctrl.fan == Fan.AUTO  
-       
+
+            print('Requesting desired temperature of: '+ str(20.0))       
             await ctrl.set_desired_temp(20.0)
-
-            await sleep(10.0)
-
+            await sleep(2.0)
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
             assert int(ctrl.desired_temp) == 20               
 
+            print('Requesting Turn OFF')       
             await ctrl.set_on(False)
-
-            await sleep(10.0)
-            
+            await sleep(ON_OFF_BUSY_WAIT_TIME)
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
+            
+            assert not ctrl.is_on
