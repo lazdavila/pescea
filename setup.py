@@ -17,7 +17,7 @@ setup(
         "Escea",
         "IoT",
     ],
-    url="https://github.com/lazdavila/python-pescea",
+    url="https://github.com/lazdavila/python-escea",
     python_requires="~=3.8",
     install_requires=["asyncio"],
     tests_require=["pytest"],
