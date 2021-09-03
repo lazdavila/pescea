@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="python-escea",
-    version="1.0.0",
+    version="1.0.1",
     author="Laz Davila",
     author_email="laz.davila@gmail.com",
     description="A python interface to the Escea fireplace controllers",
