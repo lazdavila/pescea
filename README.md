@@ -7,14 +7,14 @@ The specifications for the interface are contained in the [included pdf](./63026
 
 Further information on the Escea controller's network communications can be found in [this pdf](./Escea_Controller_Network_Communications_Summary.pdf)
 
+Note: The above documents are copyright of Escea
+
 ## Usage
 
 This package is not a standalone application for end user implementation.
 
 The aim of this package is to be used by software developers and integrators to implement
 the Escea interface on home automation platforms.
-
-For an example, please refer to the Escea component in Home Assistant.
 
 ## Credit
 
