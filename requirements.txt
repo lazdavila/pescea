@@ -1,4 +1,2 @@
-netifaces
 async_timeout
 pytest
-pytest-asyncio

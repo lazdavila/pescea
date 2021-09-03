@@ -7,20 +7,20 @@ with open("README.md", "r") as fh:
 
 setup(
     name="python-escea",
-    version="0.1",
+    version="1.0",
     author="Laz Davila",
     author_email="laz.davila@gmail.com",
     description="A python interface to the Escea fireplace controllers",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
     keywords=['Escea', 'IoT', ],
-    url="https://github.com/lazdavila/pescea",
+    url="https://github.com/lazdavila/python-pescea",
     python_requires='~=3.8',
-    install_requires=['asyncio>=3.4'],
-    tests_require=['aiounittest'],
+    install_requires=['asyncio'],
+    tests_require=['pytest'],
     packages=find_packages(exclude=['tests', 'tests.*']),
     classifiers=[
-        "Development Status :: 2 - Pre-Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3.8",
         "License :: OSI Approved :: "
