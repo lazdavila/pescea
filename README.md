@@ -15,3 +15,8 @@ The aim of this package is to be used by software developers and integrators to 
 the Escea interface on home automation platforms.
 
 For an example, please refer to the Escea component in Home Assistant.
+
+## Credit
+
+The [pizone interface](https://github.com/Swamp-Ig/pizone) was used as a template and
+for inspiration in developing this interface (which saved a lot of time, so thanks!)

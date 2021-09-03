@@ -1,36 +1,16 @@
 """Provide high-level UDP endpoints for asyncio.
 
-Adapted from: https://gist.github.com/vxgmichel/e47bff34b68adb3cf6bd4845c4bed448
+Originally from: https://gist.github.com/vxgmichel/e47bff34b68adb3cf6bd4845c4bed448
 
-Example:
-
-async def main():
-
-    # Create a local UDP enpoint
-    local = await open_local_endpoint('localhost', 8888)
-
-    # Create a remote UDP enpoint, pointing to the first one
-    remote = await open_remote_endpoint(*local.address)
-
-    # The remote endpoint sends a datagram
-    remote.send(b'Hey Hey, My My')
-
-    # The local endpoint receives the datagram, along with the address
-    data, address = await local.receive()
-
-    # This prints: Got 'Hey Hey, My My' from 127.0.0.1 port 8888
-    print(f"Got {data!r} from {address[0]} port {address[1]}")
 """
 
-__all__ = ['open_local_endpoint', 'open_remote_endpoint']
-
-# Imports
+__all__ = ["open_local_endpoint", "open_remote_endpoint"]
 
 import asyncio
-import warnings
+import logging
 
+_LOG = logging.getLogger(__name__)
 
-# Datagram protocol
 
 class DatagramEndpointProtocol(asyncio.DatagramProtocol):
     """Datagram protocol for the endpoint high-level interface."""
@@ -55,8 +35,7 @@ class DatagramEndpointProtocol(asyncio.DatagramProtocol):
         self._endpoint.feed_datagram(data, addr)
 
     def error_received(self, exc):
-        msg = 'Endpoint received an error: {!r}'
-        warnings.warn(msg.format(exc))
+        _LOG.warning("Endpoint received an error: %s", repr(exc))
 
     # Workflow control
 
@@ -72,6 +51,7 @@ class DatagramEndpointProtocol(asyncio.DatagramProtocol):
 
 
 # Enpoint classes
+
 
 class Endpoint:
     """High-level interface for UDP enpoints.
@@ -94,7 +74,7 @@ class Endpoint:
         try:
             self._queue.put_nowait((data, addr))
         except asyncio.QueueFull:
-            warnings.warn('Endpoint queue is full')
+            _LOG.warning("Endpoint queue is full")
 
     def close(self):
         # Manage flag
@@ -159,6 +139,7 @@ class LocalEndpoint(Endpoint):
 
     It is initialized with an optional queue size for the incoming datagrams.
     """
+
     pass
 
 
@@ -173,7 +154,7 @@ class RemoteEndpoint(Endpoint):
         super().send(data, None)
 
     async def receive(self):
-        """ Wait for an incoming datagram from the remote host.
+        """Wait for an incoming datagram from the remote host.
 
         This method is a coroutine.
         """
@@ -183,8 +164,10 @@ class RemoteEndpoint(Endpoint):
 
 # High-level coroutines
 
+
 async def open_datagram_endpoint(
-        host, port, *, endpoint_factory=Endpoint, remote=False, loop=None, **kwargs):
+    host, port, *, endpoint_factory=Endpoint, remote=False, loop=None, **kwargs
+):
     """Open and return a datagram endpoint.
 
     The default endpoint factory is the Endpoint class.
@@ -194,33 +177,41 @@ async def open_datagram_endpoint(
     if loop is None:
         loop = asyncio.get_event_loop()
     endpoint = endpoint_factory()
-    kwargs['remote_addr' if remote else 'local_addr'] = host, port
-    kwargs['protocol_factory'] = lambda: DatagramEndpointProtocol(endpoint)
+    kwargs["remote_addr" if remote else "local_addr"] = host, port
+    kwargs["protocol_factory"] = lambda: DatagramEndpointProtocol(endpoint)
     await loop.create_datagram_endpoint(**kwargs)
     return endpoint
 
 
 async def open_local_endpoint(
-        host='0.0.0.0', port=0, *, queue_size=None, loop=None, **kwargs):
+    host="0.0.0.0", port=0, *, queue_size=None, loop=None, **kwargs
+):
     """Open and return a local datagram endpoint.
 
     An optional queue size arguement can be provided.
     Extra keyword arguments are forwarded to `loop.create_datagram_endpoint`.
     """
     return await open_datagram_endpoint(
-        host, port, remote=False,
-        endpoint_factory=lambda: LocalEndpoint(queue_size), loop=loop,
-        **kwargs)
+        host,
+        port,
+        remote=False,
+        endpoint_factory=lambda: LocalEndpoint(queue_size),
+        loop=loop,
+        **kwargs
+    )
 
 
-async def open_remote_endpoint(
-        host, port, *, queue_size=None, loop=None, **kwargs):
+async def open_remote_endpoint(host, port, *, queue_size=None, loop=None, **kwargs):
     """Open and return a remote datagram endpoint.
 
     An optional queue size arguement can be provided.
     Extra keyword arguments are forwarded to `loop.create_datagram_endpoint`.
     """
     return await open_datagram_endpoint(
-        host, port, remote=True,
-        endpoint_factory=lambda: RemoteEndpoint(queue_size), loop=loop,
-        **kwargs)
+        host,
+        port,
+        remote=True,
+        endpoint_factory=lambda: RemoteEndpoint(queue_size),
+        loop=loop,
+        **kwargs
+    )

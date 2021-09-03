@@ -2,25 +2,34 @@
 
 import asyncio
 import logging
-import sys
 
 from abc import abstractmethod, ABC
-from asyncio import (AbstractEventLoop, Condition, Future, Task, Lock, )
+from asyncio import (
+    AbstractEventLoop,
+    Condition,
+    Future,
+    Task,
+    Lock,
+)
 from async_timeout import timeout
 from logging import Logger
 from typing import Dict, List, Set, Optional
 
 # Pescea imports:
 from .controller import Controller
-from .datagram import FireplaceDatagram
-from .message import FireplaceMessage, CommandID
+from .datagram import Datagram
+from .message import Message, CommandID
 
-DISCOVERY_SLEEP = 5*60.0  # Interval between status refreshes
-DISCOVERY_RESCAN = 5.0  # Interval on a Controller losing comms
+# Interface for fireplace search (under normal circumstances)
+DISCOVERY_SLEEP = 5 * 60.0
 
-BROADCAST_IP_ADDR = '255.255.255.255'
+# Shorter interval (if we've lost comms to a controller)
+DISCOVERY_RESCAN = 5.0
 
-_LOG = logging.getLogger('pescea.discovery')  # type: Logger
+BROADCAST_IP_ADDR = "255.255.255.255"
+
+_LOG = logging.getLogger(__name__)  # type: Logger
+
 
 class LogExceptions:
     """Utility context manager to log and discard exceptions"""
@@ -33,9 +42,9 @@ class LogExceptions:
 
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
-            _LOG.exception(
-                'Exception ignored when calling listener %s', self.func)
+            _LOG.exception("Exception ignored when calling listener %s", self.func)
         return True
+
 
 class Listener:
     """Base class for listeners for Escea updates"""
@@ -118,9 +127,13 @@ class AbstractDiscoveryService(ABC):
 class DiscoveryService(AbstractDiscoveryService, Listener):
     """Discovery protocol class. Not for external use."""
 
-    def __init__(self, loop: AbstractEventLoop = None, ip_addr: str = BROADCAST_IP_ADDR) -> None:
+    def __init__(
+        self, loop: AbstractEventLoop = None, ip_addr: str = BROADCAST_IP_ADDR
+    ) -> None:
         """Start the discovery protocol using the supplied loop.
 
+        Args:
+            - ip_addr: Address of controller (otherwise will broadcast)
         raises:
             RuntimeError: If attempted to start the protocol when it is
                           already running.
@@ -130,8 +143,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self._listeners = []  # type: List[Listener]
         self._close_task = None  # type: Optional[Task]
 
-
-        _LOG.info('Starting discovery protocol')
+        _LOG.info("Starting discovery protocol")
         if not loop:
             self.loop = asyncio.get_event_loop()
         else:
@@ -139,7 +151,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self.sending_lock = Lock(loop=self.loop)
 
         self._broadcast_ip = ip_addr
-        self._datagram = FireplaceDatagram(self.loop, ip_addr, self.sending_lock)
+        self._datagram = Datagram(self.loop, ip_addr, self.sending_lock)
 
         self._discovery_started = False
         self._scan_condition = Condition(loop=self.loop)  # type: Condition
@@ -156,10 +168,10 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
     def _task_done_callback(self, task: Task):
         if task.exception():
-            _LOG.exception('Uncaught exception', exc_info=task.exception())
+            _LOG.exception("Uncaught exception", exc_info=task.exception())
         self._tasks.remove(task)
 
-    # managing the task list (also called by controller)
+    # managing the task list (also called by controller for poll_loop)
     def create_task(self, coro) -> Task:
         """Create a task in the event loop. Keeps track of created tasks."""
         task = self.loop.create_task(coro)  # type: Task
@@ -178,6 +190,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         def callback():
             for controller in self._controllers.values():
                 listener.controller_discovered(controller)
+
         self.loop.call_soon(callback)
 
     def remove_listener(self, listener: Listener) -> None:
@@ -185,35 +198,35 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self._listeners.remove(listener)
 
     def controller_discovered(self, ctrl: Controller) -> None:
-        _LOG.info(
-            'New controller found: id=%s ip=%s',
-            ctrl.device_uid, ctrl.device_ip)
+        _LOG.info("New controller found: id=%s ip=%s", ctrl.device_uid, ctrl.device_ip)
         for listener in self._listeners:
-            with LogExceptions('controller_discovered'):
+            with LogExceptions("controller_discovered"):
                 listener.controller_discovered(ctrl)
 
     def controller_disconnected(self, ctrl: Controller, ex: Exception) -> None:
         _LOG.debug(
-            'Connection to controller lost: id=%s ip=%s',
-            ctrl.device_uid, ctrl.device_ip)
+            "Connection to controller lost: id=%s ip=%s",
+            ctrl.device_uid,
+            ctrl.device_ip,
+        )
         self._disconnected_uids.add(ctrl.device_uid)
         self.create_task(self._rescan())
         for listener in self._listeners:
-            with LogExceptions('controller_disconnected'):
+            with LogExceptions("controller_disconnected"):
                 listener.controller_disconnected(ctrl, ex)
 
     def controller_reconnected(self, ctrl: Controller) -> None:
         _LOG.debug(
-            'Controller reconnected: id=%s ip=%s',
-            ctrl.device_uid, ctrl.device_ip)
+            "Controller reconnected: id=%s ip=%s", ctrl.device_uid, ctrl.device_ip
+        )
         self._disconnected_uids.remove(ctrl.device_uid)
         for listener in self._listeners:
-            with LogExceptions('controller_reconnected'):
+            with LogExceptions("controller_reconnected"):
                 listener.controller_reconnected(ctrl)
 
     def controller_update(self, ctrl: Controller) -> None:
         for listener in self._listeners:
-            with LogExceptions('controller_update'):
+            with LogExceptions("controller_update"):
                 listener.controller_update(ctrl)
 
     @property
@@ -221,60 +234,63 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         """Dictionary of all the currently discovered controllers"""
         return self._controllers
 
-    # Non-context versions of starting.
     async def start_discovery(self) -> None:
+        """Non-context manager version for starting discovery"""
         if not self._discovery_started:
             self._discovery_started = True
             self.create_task(self._scan_loop())
 
     async def _scan_loop(self) -> None:
-        while True:
+        """Scan loop to search for fireplaces"""
+        while not self._close_task:
             await self._send_broadcast()
 
             try:
                 async with timeout(
-                        DISCOVERY_RESCAN if len(self._disconnected_uids) > 0
-                        else DISCOVERY_SLEEP):
+                    DISCOVERY_RESCAN
+                    if len(self._disconnected_uids) > 0
+                    else DISCOVERY_SLEEP
+                ):
+                    # Allows interrupt when need to rescan
                     async with self._scan_condition:
                         await self._scan_condition.wait()
             except asyncio.TimeoutError:
                 pass
-            
-            if self._close_task:
-                return
 
     async def _send_broadcast(self):
-        _LOG.debug('Sending discovery message to addr %s', self._broadcast_ip)
+        """Send UDP commands to broadcast address to search for fires"""
+        _LOG.debug("Sending discovery message to addr %s", self._broadcast_ip)
         try:
-            responses = await self._datagram.send_command(
-                CommandID.SEARCH_FOR_FIRES, broadcast=True)
+            responses = await self._datagram.send_command(CommandID.SEARCH_FOR_FIRES)
             for addr in responses:
                 self._discovery_received(responses[addr], addr)
         except ConnectionError:
-            _LOG.warning('No controllers responded to broadcast')
+            _LOG.warning("No controllers responded to broadcast")
 
     async def rescan(self) -> None:
+        """Request a rescan of fireplaces (eg after losing comms)"""
         if self.is_closed:
             raise ConnectionError("Already closed")
         _LOG.debug("Manual rescan of controllers triggered.")
         await self._rescan()
 
-    # Wake up the main loop for immediate scan
     async def _rescan(self) -> None:
+        """Interrupt the scan loop so does immediate search for fireplaces"""
         async with self._scan_condition:
             self._scan_condition.notify()
 
-    # Closing the connection
     async def close(self) -> None:
+        """Request local scan loop and controllers to exit gracefully"""
         if self._close_task:
             # Already called, so wait completion
             await self._close_task
             return
-        _LOG.info('Close called on discovery service.')
+        _LOG.info("Close called on discovery service.")
+        # Request controllers to exit
         self._close_task = asyncio.current_task(loop=self.loop)
         for _, ctrl in self._controllers.items():
             await ctrl.close()
-        # Wake up loop so it exists
+        # Request local scan loop to exit
         await self._rescan()
         if len(self._tasks) > 0:
             await asyncio.wait(self._tasks)
@@ -283,29 +299,15 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     def is_closed(self) -> bool:
         return self._close_task is not None
 
-    def _find_by_addr(self, addr: str) -> Optional[Controller]:
-        for _, ctrl in self._controllers.items():
-            if ctrl.device_ip == addr[0]:
-                return ctrl
-        return None
-
-    async def _wrap_update(self, coro):
-        try:
-            await coro
-        except ConnectionError as ex:
-            _LOG.warning(
-                'Unable to complete %s due to connection error: %s',
-                coro, repr(ex))
-
-    def _discovery_received(self, data: FireplaceMessage, addr):
+    def _discovery_received(self, data: Message, addr):
+        """Process the received discovery response from a fireplace.
+        Start up a controller if don't already have one
+        """
         device_ip = addr
-        device_uid = data.serial_number
+        device_uid = data.serial_number  # Used as the unique id
 
         if device_uid not in self._controllers:
-            # Create new controller.
-            # We don't have to set the loop here since it's set for
-            # the thread already.
-            controller = self._create_controller(device_uid, device_ip)
+            controller = Controller(self, device_uid=device_uid, device_ip=device_ip)
 
             async def initialize_controller():
                 try:
@@ -313,7 +315,9 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
                 except ConnectionError as ex:
                     _LOG.warning(
                         "Can't connect to discovered server at IP '%s' exception: %s",
-                        device_ip, repr(ex))
+                        device_ip,
+                        repr(ex),
+                    )
                     return
 
                 self._controllers[device_uid] = controller
@@ -324,13 +328,12 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
             controller = self._controllers[device_uid]
             controller.refresh_address(device_ip)
 
-    def _create_controller(self, device_uid, device_ip):
-        return Controller(
-            self, device_uid=device_uid, device_ip=device_ip)
 
-def discovery_service(*listeners: Listener,
-              loop: AbstractEventLoop = None,
-              ip_addr: str = BROADCAST_IP_ADDR) -> AbstractDiscoveryService:
+def discovery_service(
+    *listeners: Listener,
+    loop: AbstractEventLoop = None,
+    ip_addr: str = BROADCAST_IP_ADDR
+) -> AbstractDiscoveryService:
     """Create discovery service. Returned object is an asynchronous
     context manager so can be used with 'async with' statement.
     Alternately call start_discovery or start_discovery_async to commence

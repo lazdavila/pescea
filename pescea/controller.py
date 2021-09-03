@@ -2,7 +2,6 @@
 
 import logging
 import asyncio
-import sys
 
 from enum import Enum
 from typing import Dict, Union
@@ -11,125 +10,133 @@ from async_timeout import timeout
 from copy import deepcopy
 
 # Pescea imports:
-from pescea.message import FireplaceMessage, CommandID, ResponseID, MIN_SET_TEMP, MAX_SET_TEMP, expected_response
-from pescea.datagram import FireplaceDatagram
+from pescea.message import (
+    Message,
+    CommandID,
+    ResponseID,
+    MIN_SET_TEMP,
+    MAX_SET_TEMP,
+    expected_response,
+)
+from pescea.datagram import Datagram
 
-_LOG = logging.getLogger('pescea.controller')
+_LOG = logging.getLogger(__name__)
 
-# Time to wait for results from UDP command to server
-REQUEST_TIMEOUT = 5
-
-# Seconds between updates under normal conditions
-#  - nothing changes quickly with fireplaces
+# Seconds between (internal) updates under normal conditions
 REFRESH_INTERVAL = 30.0
 
-# Seconds to wait between discovery notifications (if no change)
-NOTIFY_REFRESH_INTERVAL = 5*60.0
+# Seconds between publishing changes to listeners
+# - Updates due to changes happen immediately
+NOTIFY_REFRESH_INTERVAL = 5 * 60.0
 
-# Retry rate when first get disconnected
+# Retry rate when first stop getting responses
+# - this is needed as UDP is not guaranteed and expect missed messages
 RETRY_INTERVAL = 10.0
 
-# Timeout to stop retrying and reduce poll rate (and notify Discovery)
+# Timeout to stop retrying and reduce poll rate
+# - plus notify listeners of disconnections
 RETRY_TIMEOUT = 60.0
 
-# Time to wait when have been disconnected longer than RETRY_TIMOUT
-DISCONNECTED_INTERVAL = 5*60.0
+# Time to retry updates once we declare disconnection
+DISCONNECTED_INTERVAL = 5 * 60.0
 
-# Time to wait for fireplace to start up / shut down
-# - Commands are stored, but not sent to the fireplace until it has settled
-# Disclaimer: This was measured from Escea remote display
-ON_OFF_BUSY_WAIT_TIME = 66
+# Time to wait for fireplace to turn fire on / off
+# - While busy, commands are stored locally, but not sent on
+# - This period was measured from an Escea OEM remote control
+ON_OFF_BUSY_WAIT_TIME = 66.0
 
-class ControllerState(Enum):
-    """ Controller states:
 
-        Under normal operations:
-            The Controller is READY:
-                - The Controller sends commands directly to the Fireplace
-                - The Controller polls at REFRESH_INTERVAL
-        When toggling the fire power:
-            The Controller remains BUSY for ON_OFF_BUSY_WAIT_TIME:
-                - The Controller buffers requests but does not send to the Fireplace
-        When responses are missed (expected as we are using UDP datagrams):
-            The Controller is NON_RESPONSIVE
-                - The Controller will poll at a (quicker) retry rate
-        When there are no comms for a prolonged period:
-            The Controller enters DISCONNECTED state
-                - The Controller will continue to poll at a reduced rate
-                - The Controller buffers requests but cannot send to the Fireplace
+class State(Enum):
+    """Controller states:
+
+    Under normal operations:
+        The Controller is READY:
+            - The Controller sends commands directly to the Fireplace
+            - The Controller polls at REFRESH_INTERVAL
+    When toggling the fire power:
+        The Controller remains BUSY for ON_OFF_BUSY_WAIT_TIME:
+            - The Controller buffers requests but does not send to the Fireplace
+    When responses are missed (expected as we are using UDP datagrams):
+        The Controller is NON_RESPONSIVE
+            - The Controller will poll at a (quicker) retry rate
+    When there are no comms for a prolonged period:
+        The Controller enters DISCONNECTED state
+            - The Controller will continue to poll at a reduced rate
+            - The Controller buffers requests but cannot send to the Fireplace
     """
-    BUSY = 'BusyWaiting'
-    READY = 'Ready'
-    NON_RESPONSIVE = 'NonResponsive'
-    DISCONNECTED = 'Disconnected'
+
+    BUSY = "BusyWaiting"
+    READY = "Ready"
+    NON_RESPONSIVE = "NonResponsive"
+    DISCONNECTED = "Disconnected"
+
 
 class Fan(Enum):
-    """All fan modes"""
-    FLAME_EFFECT = 'FlameEffect'
-    AUTO = 'Auto'
-    FAN_BOOST = 'FanBoost'
+    """Supported fan modes"""
 
-class DictEntries(Enum):
-    """Available controller attributes - Internal Use Only"""
-    IP_ADDRESS = 'IPAddress'
-    DEVICE_UID = 'DeviceUId'
-    CONTROLLER_STATE = 'ControllerState'
-    HAS_NEW_TIMERS = 'HasNewTimers'
-    FIRE_IS_ON = 'FireIsOn'
-    FAN_MODE = 'FanMode'
-    DESIRED_TEMP = 'DesiredTemp'
-    CURRENT_TEMP = 'CurrentTemp'
+    FLAME_EFFECT = "FlameEffect"
+    AUTO = "Auto"
+    FAN_BOOST = "FanBoost"
+
+
+class Settings(Enum):
+    """Available controller system settings - Internal Use Only"""
+
+    IP_ADDRESS = "IPAddress"
+    DEVICE_UID = "DeviceUId"
+    CONTROLLER_STATE = "State"
+    HAS_NEW_TIMERS = "HasNewTimers"
+    FIRE_IS_ON = "FireIsOn"
+    FAN_MODE = "FanMode"
+    DESIRED_TEMP = "DesiredTemp"
+    CURRENT_TEMP = "CurrentTemp"
+
 
 class Controller:
     """Interface to Escea controller"""
 
-    DictValue = Union[str, int, float, bool, Fan]
-    ControllerData = Dict[DictEntries, DictValue]
+    Value = Union[str, int, float, bool, Fan]
+    ControllerData = Dict[Settings, Value]
 
-    def __init__(self, discovery, device_uid: str,
-                 device_ip: str) -> None:
+    def __init__(self, discovery, device_uid: str, device_ip: str) -> None:
         """Create a controller interface.
 
-        Usually this is called from the discovery service.
-
         Args:
+            discovery: DiscoveryService() object implementing (at least):
+                        - loop
+                        - sending_lock
+                        - controller_update (callback)
+                        - controller_disconnected (callback)
+                        - controller_reconnected (callback)
             device_uid: Controller UId as a string (Serial Number of unit)
             device_addr: Device network address. Usually specified as IP
                 address
         """
 
-
-        """ System settings:
-            on / off
-            fan mode
-            set temperature
-            current temperature
-        """
         self._discovery = discovery
         self._system_settings = {}  # type: Controller.ControllerData
-        self._prior_settings = {} # type: Controller.ControllerData        
-        self._system_settings[DictEntries.IP_ADDRESS] = device_ip
-        self._system_settings[DictEntries.DEVICE_UID] = device_uid
+        self._prior_settings = {}  # type: Controller.ControllerData
+        self._system_settings[Settings.IP_ADDRESS] = device_ip
+        self._system_settings[Settings.DEVICE_UID] = device_uid
 
-        self._datagram = FireplaceDatagram(self._discovery.loop, device_ip, self._discovery.sending_lock)
+        self._datagram = Datagram(
+            self._discovery.loop, device_ip, self._discovery.sending_lock
+        )
 
         self._loop_interrupt_condition = asyncio.Condition(loop=self._discovery.loop)
 
-        self._initialised = False        
+        self._initialised = False
 
     async def initialize(self) -> None:
-        """ Initialize the controller, does not complete until the firplace has
-            been contacted and current settings read.
+        """Initialize the controller, does not complete until the firplace has
+        been contacted and current settings read.
         """
 
-        # Under normal operations, the Controller state is READY
-        self._state = ControllerState.READY
-        self._last_response = 0.0 # Used to track last valid message received
-        self._busy_end_time = 0.0 # Used to track when exit BUSY state
-        self._last_update = 0.0 # Used to rate limit the notifications to discovery
-
-        # Use to exit poll_loop when told to
-        self._closed = False
+        self._state = State.READY
+        self._last_response = 0.0  # Tracks last valid message received
+        self._busy_end_time = 0.0  # Tracks when exit BUSY state
+        self._last_update = 0.0  # To 'rate limit' the notifications to discovery
+        self._closed = False  # To exit poll_loop when done
 
         # Read current state of fireplace
         await self._refresh_system(notify=False)
@@ -137,41 +144,45 @@ class Controller:
         self._initialised = True
 
         # Start regular polling for status updates
-        self._discovery.loop.create_task(self._poll_loop())
+        self._poll_loop_task = self._discovery.loop.create_task(self._poll_loop())
 
     async def close(self):
-        """Signal loop to exit"""
+        """Signal loop to exit, then wait till done"""
+        if self._closed:
+            return
+
         self._closed = True
         async with self._loop_interrupt_condition:
             self._loop_interrupt_condition.notify()
+        await self._poll_loop_task
 
     async def _poll_loop(self) -> None:
-        """ Regularly poll for status update from fireplace.
-            If Disconnected, retry based on how long ago we last had an update.
-            If Disconnected for a long time, let Discovery know we are giving up.
+        """Regularly poll for status update from fireplace.
+        If Disconnected, retry based on how long ago we last had an update.
         """
         while not self._closed:
 
             try:
                 await self._refresh_system()
-            except:
-                exc = sys.exc_info()[0]
-                _LOG.exception('Unexpected error: %s - EXITING', exc)
+            except Exception as exc:
+                _LOG.exception("Unexpected exception (EXITING): %s", repr(exc))
                 self._closed = True
                 return
 
-            _LOG.debug('Polling unit %s at address %s (current state is %s)',
-                self._system_settings[DictEntries.DEVICE_UID],
-                self._system_settings[DictEntries.IP_ADDRESS],
-                self._state)
+            _LOG.debug(
+                "Polling unit %s at address %s (current state is %s)",
+                self._system_settings[Settings.DEVICE_UID],
+                self._system_settings[Settings.IP_ADDRESS],
+                self._state,
+            )
 
-            if self._state == ControllerState.READY:
+            if self._state == State.READY:
                 sleep_time = REFRESH_INTERVAL
-            elif self._state == ControllerState.NON_RESPONSIVE:
+            elif self._state == State.NON_RESPONSIVE:
                 sleep_time = RETRY_INTERVAL
-            elif self._state == ControllerState.DISCONNECTED:
+            elif self._state == State.DISCONNECTED:
                 sleep_time = DISCONNECTED_INTERVAL
-            elif self._state == ControllerState.BUSY:
+            elif self._state == State.BUSY:
                 sleep_time = max(self._busy_end_time - time(), 0.0)
 
             try:
@@ -185,70 +196,77 @@ class Controller:
     @property
     def device_ip(self) -> str:
         """IP Address of the unit"""
-        return self._system_settings[DictEntries.IP_ADDRESS]
+        return self._system_settings[Settings.IP_ADDRESS]
 
     @property
     def device_uid(self) -> str:
         """UId of the unit (serial number)"""
-        return self._system_settings[DictEntries.DEVICE_UID]
+        return self._system_settings[Settings.DEVICE_UID]
 
     @property
     def discovery(self):
+        """Handle to the discovery service"""
         return self._discovery
 
     @property
-    def state(self) -> ControllerState:
-        """True if the system is turned on"""
+    def state(self) -> State:
+        """Controller state"""
         return self._state
 
     @property
     def is_on(self) -> bool:
-        """True if the system is turned on"""
-        return self._get_system_state(DictEntries.FIRE_IS_ON)
+        """True if the fire is turned on"""
+        return self._get_system_state(Settings.FIRE_IS_ON)
 
     async def set_on(self, value: bool) -> None:
-        """Turn the system on or off.
-           Async method, await to ensure command revieved by system.
-           Note: After systems receives on or off command, must wait several minutes to be actioned
+        """Turn the fire on or off.
+        Does not return until command has been sent to the fireplace.
+        Note: After systems receives on or off command, must wait ON_OFF_BUSY_TIMEOUT
+        before sending further commands (they will be buffered internally)
         """
-        await self._set_system_state(DictEntries.FIRE_IS_ON, value)
+        await self._set_system_state(Settings.FIRE_IS_ON, value)
 
     @property
     def fan(self) -> Fan:
         """The current fan level."""
-        return self._get_system_state(DictEntries.FAN_MODE)
+        return self._get_system_state(Settings.FAN_MODE)
 
     async def set_fan(self, value: Fan) -> None:
-        """The fan level. 
-           Async method, await to ensure command revieved by system.
+        """The fan level.
+        Does not return until command has been sent to the fireplace.
         """
-        await self._set_system_state(DictEntries.FAN_MODE, value)
+        await self._set_system_state(Settings.FAN_MODE, value)
 
     @property
     def desired_temp(self) -> float:
-        """fireplace DesiredTemp temperature.
-        """
-        return float(self._get_system_state(DictEntries.DESIRED_TEMP))
+        """fireplace DesiredTemp temperature."""
+        return float(self._get_system_state(Settings.DESIRED_TEMP))
 
     async def set_desired_temp(self, value: float):
         """Fireplace DesiredTemp temperature.
+        Does not return until command has been sent to the fireplace.
 
-            This is the unit target temp
-            Args:
-                value: Valid settings are in range MIN_TEMP..MAX_TEMP
-                at 1 degree increments (will be rounded)
+        This is the target temp for the fire
+        Args:
+            value: Valid settings are in range MIN_TEMP..MAX_TEMP
+            at 1 degree increments (will be rounded)
         """
         degrees = round(value)
         if degrees < MIN_SET_TEMP or degrees > MAX_SET_TEMP:
-            _LOG.error('Desired Temp %s is out of range (%s-%s)', degrees, MIN_SET_TEMP, MAX_SET_TEMP)
+            _LOG.error(
+                "Desired Temp %s is out of range (%s-%s)",
+                degrees,
+                MIN_SET_TEMP,
+                MAX_SET_TEMP,
+            )
             return
 
-        await self._set_system_state(DictEntries.DESIRED_TEMP, degrees)
+        await self._set_system_state(Settings.DESIRED_TEMP, degrees)
 
     @property
     def current_temp(self) -> float:
         """The room air temperature"""
-        return float(self._get_system_state(DictEntries.CURRENT_TEMP))
+        return float(self._get_system_state(Settings.CURRENT_TEMP))
 
     @property
     def min_temp(self) -> float:
@@ -261,33 +279,33 @@ class Controller:
         return float(MAX_SET_TEMP)
 
     async def _refresh_system(self, notify: bool = True) -> None:
-        """ Request fresh status from the fireplace.
+        """Request fresh status from the fireplace.
+        This is also where state changes are handled.
 
-            This is also where state changes are handled
-            Approach:
+        Approach:
 
-                if current state BUSY (not timed out) -> return
+            if current state BUSY (and not timed out) -> return
 
-                request status
+            request status
 
-                New status received:
-                    if prior state READY
-                        update local system settings from received message
-                    else (prior state must be DISCONNECTED / NON_RESPONSIVE / BUSY (timeout))
-                        sync buffered commands to fireplace
-                        new state READY
-                        if prior state DISCONNECTED:
-                            notify discovery reconnected
+            New status received:
+                if prior state READY
+                    update local system settings from received message
+                else (prior state DISCONNECTED / NON_RESPONSIVE / BUSY (timeout))
+                    sync buffered commands to fireplace
+                    new state READY
+                    if prior state DISCONNECTED:
+                        notify discovery reconnected
 
-                No status received:
-                    prior state *ANY*
-                        if time since last response < RETRY_TIMEOUT
-                            new state NON_RESPONSIVE
-                        else
-                            notify discovery disconnected
-                            new state DISCONNECTED
+            No status received:
+                prior state *ANY*
+                    if time since last response < RETRY_TIMEOUT
+                        new state NON_RESPONSIVE
+                    else
+                        new state DISCONNECTED
+                        notify discovery disconnected
         """
-        if self._state == ControllerState.BUSY and time() < self._busy_end_time:
+        if self._state == State.BUSY and time() < self._busy_end_time:
             return
 
         prior_state = self._state
@@ -295,32 +313,38 @@ class Controller:
         if (response is not None) and (response.response_id == ResponseID.STATUS):
             # We have a valid response - the controller is communicating
 
-            self._state = ControllerState.READY
+            self._state = State.READY
 
             # These values are readonly, so copy them in any case
-            self._system_settings[DictEntries.HAS_NEW_TIMERS] = response.has_new_timers
-            self._system_settings[DictEntries.CURRENT_TEMP]   = response.current_temp
+            self._system_settings[Settings.HAS_NEW_TIMERS] = response.has_new_timers
+            self._system_settings[Settings.CURRENT_TEMP] = response.current_temp
 
-            if prior_state == ControllerState.READY:
+            if prior_state == State.READY:
 
                 # Normal operation, update our internal values
-                self._system_settings[DictEntries.DESIRED_TEMP]   = response.desired_temp
+                self._system_settings[Settings.DESIRED_TEMP] = response.desired_temp
                 if response.fan_boost_is_on:
-                    self._system_settings[DictEntries.FAN_MODE]   = Fan.FAN_BOOST
+                    self._system_settings[Settings.FAN_MODE] = Fan.FAN_BOOST
                 elif response.flame_effect:
-                    self._system_settings[DictEntries.FAN_MODE]   = Fan.FLAME_EFFECT
+                    self._system_settings[Settings.FAN_MODE] = Fan.FLAME_EFFECT
                 else:
-                    self._system_settings[DictEntries.FAN_MODE]   = Fan.AUTO
-                self._system_settings[DictEntries.FIRE_IS_ON]     = response.fire_is_on
+                    self._system_settings[Settings.FAN_MODE] = Fan.AUTO
+                self._system_settings[Settings.FIRE_IS_ON] = response.fire_is_on
 
             else:
 
                 # We have come back to READY state.
-                # We need to try to sync the fireplace settings with our internal copies
+                # We need to try to sync buffered settings to fireplace
 
-
-                if response.desired_temp != self._system_settings[DictEntries.DESIRED_TEMP]:
-                    await self._set_system_state(DictEntries.DESIRED_TEMP, self._system_settings[DictEntries.DESIRED_TEMP], sync=True)
+                if (
+                    response.desired_temp
+                    != self._system_settings[Settings.DESIRED_TEMP]
+                ):
+                    await self._set_system_state(
+                        Settings.DESIRED_TEMP,
+                        self._system_settings[Settings.DESIRED_TEMP],
+                        sync=True,
+                    )
 
                 if response.fan_boost_is_on:
                     response_fan = Fan.FAN_BOOST
@@ -328,107 +352,128 @@ class Controller:
                     response_fan = Fan.FLAME_EFFECT
                 else:
                     response_fan = Fan.AUTO
-                if response_fan != self._system_settings[DictEntries.FAN_MODE]:
-                    await self._set_system_state(DictEntries.FAN_MODE, self._system_settings[DictEntries.FAN_MODE], sync=True)
+                if response_fan != self._system_settings[Settings.FAN_MODE]:
+                    await self._set_system_state(
+                        Settings.FAN_MODE,
+                        self._system_settings[Settings.FAN_MODE],
+                        sync=True,
+                    )
 
-                # Do power last
-                if response.fire_is_on != self._system_settings[DictEntries.FIRE_IS_ON]:
-                    # This will also set the BUSY state
-                    await self._set_system_state(DictEntries.FIRE_IS_ON, self._system_settings[DictEntries.FIRE_IS_ON], sync=True )
+                # Do power last, as then we go to BUSY state
+                if response.fire_is_on != self._system_settings[Settings.FIRE_IS_ON]:
+                    await self._set_system_state(
+                        Settings.FIRE_IS_ON,
+                        self._system_settings[Settings.FIRE_IS_ON],
+                        sync=True,
+                    )
 
-                if prior_state == ControllerState.DISCONNECTED:
+                if prior_state == State.DISCONNECTED:
                     self._discovery.controller_reconnected(self)
-            
+
             if notify:
+                # send an update to discovery if there have been any changes
+                # or if haven't sent one in last NOTIFY_REFRESH_INTERVAL
                 changes_found = False
                 for entry in self._system_settings:
-                    if not entry in self._prior_settings \
-                            or (self._prior_settings[entry] != self._system_settings[entry]):
+                    if not entry in self._prior_settings or (
+                        self._prior_settings[entry] != self._system_settings[entry]
+                    ):
                         changes_found = True
                         break
-                if changes_found \
-                        or (time() - self._last_update > NOTIFY_REFRESH_INTERVAL):
+                if changes_found or (
+                    time() - self._last_update > NOTIFY_REFRESH_INTERVAL
+                ):
                     self._last_update = time()
                     self._prior_settings = deepcopy(self._system_settings)
-                    self._discovery.controller_update(self)       
+                    self._discovery.controller_update(self)
         else:
             # No / invalid response, need to check if we need to change state
             if time() - self._last_response < RETRY_TIMEOUT:
-                self._state = ControllerState.NON_RESPONSIVE
+                self._state = State.NON_RESPONSIVE
             else:
-                self._state = ControllerState.DISCONNECTED
-                if prior_state != ControllerState.DISCONNECTED:
+                self._state = State.DISCONNECTED
+                if prior_state != State.DISCONNECTED:
                     self._discovery.controller_disconnected(self, TimeoutError)
 
-    async def _request_status(self) -> FireplaceMessage:
+    async def _request_status(self) -> Message:
+        """Send command to fireplace requesting current status"""
         try:
             responses = await self._datagram.send_command(CommandID.STATUS_PLEASE)
-            if (len(responses) > 0):
-                this_response = next(iter(responses)) # only expecting one
-                if responses[this_response].response_id == expected_response(CommandID.STATUS_PLEASE):
+            if len(responses) > 0:
+                this_response = next(iter(responses))  # only expecting one
+                if responses[this_response].response_id == expected_response(
+                    CommandID.STATUS_PLEASE
+                ):
                     # all good
                     self._last_response = time()
                     return responses[this_response]
         except ConnectionError:
             pass
         # If we get here... did not receive a response or not valid
-        if self._state != ControllerState.DISCONNECTED:
-            self._state = ControllerState.NON_RESPONSIVE
+        if self._state != State.DISCONNECTED:
+            self._state = State.NON_RESPONSIVE
         return None
 
     def refresh_address(self, address):
-        """Called from discovery to update the address"""
-        if self._system_settings[DictEntries.IP_ADDRESS] == address:
+        """Called from discovery to point controller to the IP address"""
+        if self._system_settings[Settings.IP_ADDRESS] == address:
             return
 
         self._datagram.set_ip(address)
-        self._system_settings[DictEntries.IP_ADDRESS] = address
+        self._system_settings[Settings.IP_ADDRESS] = address
 
+        # signal the poll loop to wake up and ask for new status
         async def signal_loop(self):
             async with self._loop_interrupt_condition:
                 self._loop_interrupt_condition.notify()
 
         self._discovery.loop.create_task(signal_loop(self))
 
-    def _get_system_state(self, state: DictEntries):
+    def _get_system_state(self, state: Settings):
+        """Locally stored (buffered) value, or received from fireplace"""
         return self._system_settings[state]
 
-    async def _set_system_state(self, state: DictEntries, value, sync: bool = False):
+    async def _set_system_state(self, state: Settings, value, sync: bool = False):
+        """Send command to fireplace to change given state.
+        Args:
+            sync: state/value have been buffered -> send to fireplace
+        """
 
         # ignore if we are not forcing the synch, and value matches already
         if (not sync) and (self._system_settings[state] == value):
             return
 
-        _LOG.debug('_set_system_state - uid: %s | %s from:%s to:%s  (sync:%s)',   
-                str(self.device_uid),
-                str(state),
-                str(self._system_settings[state]),
-                str(value),
-                str(sync))   
+        _LOG.debug(
+            "_set_system_state - uid: %s | %s from:%s to:%s  (sync:%s)",
+            str(self.device_uid),
+            str(state),
+            str(self._system_settings[state]),
+            str(value),
+            str(sync),
+        )
 
         # save the new value internally
         self._system_settings[state] = value
 
-        if (not sync) and (self._state != ControllerState.READY):
+        if (not sync) and (self._state != State.READY):
             # We've saved the new value.... just can't send it to the controller yet
             return
 
         command = None
 
-        if state == DictEntries.FIRE_IS_ON:
+        if state == Settings.FIRE_IS_ON:
             if value:
                 command = CommandID.POWER_ON
             else:
                 command = CommandID.POWER_OFF
 
-        elif state == DictEntries.DESIRED_TEMP:
+        elif state == Settings.DESIRED_TEMP:
             command = CommandID.NEW_SET_TEMP
 
-        elif state == DictEntries.FAN_MODE:
+        elif state == Settings.FAN_MODE:
 
             # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
-            # Any change will take one or two separate commands:
-            # PART 1 -
+            # Any change to Fan will take one or two separate commands:
             #
             # To AUTO:
             # 1. turn off FAN_BOOST
@@ -446,19 +491,22 @@ class Controller:
                 command = CommandID.FAN_BOOST_OFF
 
         else:
-            raise(AttributeError, 'Unexpected state: {0}'.format(state))
+            raise (AttributeError, "Unexpected state: {0}".format(state))
 
         if command is not None:
             valid_response = False
             try:
                 responses = await self._datagram.send_command(command, value)
-                if (len(responses) > 0) \
-                    and (responses[next(iter(responses))].response_id == expected_response(command)):
-                        # No / invalid response
-                        valid_response = True
-                        _LOG.debug('_set_system_state - send_command(success): %s -> %s',   
-                                str(self.device_uid),
-                                str(command))                           
+                if (len(responses) > 0) and (
+                    responses[next(iter(responses))].response_id
+                    == expected_response(command)
+                ):
+                    valid_response = True
+                    _LOG.debug(
+                        "_set_system_state - send_command(success): %s -> %s",
+                        str(self.device_uid),
+                        str(command),
+                    )
 
             except ConnectionError:
                 pass
@@ -467,16 +515,15 @@ class Controller:
             else:
                 return
 
-        if state == DictEntries.FAN_MODE:
+        if state == Settings.FAN_MODE:
             # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
             # Any change will take one or two separate commands:
-            # PART 2 -
             #
             # To AUTO:
             # 2. turn off FLAME_EFFECT
             if value == Fan.AUTO:
                 command = CommandID.FLAME_EFFECT_OFF
-                            
+
             # To FAN_BOOST:
             # 2. Turn on FAN_BOOST
             elif value == Fan.FAN_BOOST:
@@ -490,13 +537,16 @@ class Controller:
             valid_response = False
             try:
                 responses = await self._datagram.send_command(command, value)
-                if (len(responses) > 0) \
-                    and (responses[next(iter(responses))].response_id == expected_response(command)):
-                        # No / invalid response
-                        valid_response = True
-                        _LOG.debug('_set_system_state - send_command(success): %s -> %s',   
-                                str(self.device_uid),
-                                str(command))                       
+                if (len(responses) > 0) and (
+                    responses[next(iter(responses))].response_id
+                    == expected_response(command)
+                ):
+                    valid_response = True
+                    _LOG.debug(
+                        "_set_system_state - send_command(success): %s -> %s",
+                        str(self.device_uid),
+                        str(command),
+                    )
             except ConnectionError:
                 pass
             if valid_response:
@@ -504,11 +554,12 @@ class Controller:
             else:
                 return
 
-        # Need to refresh immediately after setting (unless synching, then poll loop will update)
+        # Need to refresh immediately after setting
+        # (unless synching, in which case the poll loop will update)
         if not sync:
             await self._refresh_system()
 
-        # If get here, and just toggled the fireplace power... need to wait for a while
-        if state == DictEntries.FIRE_IS_ON:
-            self._state = ControllerState.BUSY
+        # If get here, and just toggled the fireplace power... need to buffer for a while
+        if state == Settings.FIRE_IS_ON:
+            self._state = State.BUSY
             self._busy_end_time = time() + ON_OFF_BUSY_WAIT_TIME
