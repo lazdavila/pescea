@@ -9,7 +9,7 @@ with open("README.md", "r") as fh:
 setup(
     name="pescea",
     packages=["pescea"],
-    version="1.0.3",
+    version="v1.0.3",
     license="gpl-3.0",
     description="Python Escea Fireplace Interface",
     long_description=LONG_DESCRIPTION,
