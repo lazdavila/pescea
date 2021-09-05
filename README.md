@@ -1,5 +1,5 @@
 
-# python-Escea - python interface to Escea fireplaces
+# pescea - python interface to Escea fireplaces
 
 This is a python interface to the [Escea range](https://escea.com/) of fireplaces.
 
