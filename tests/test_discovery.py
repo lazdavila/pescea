@@ -3,7 +3,7 @@
 from pytest import mark
 from asyncio import sleep
 
-from pescea.controller import Fan, State, Controller
+from pescea.controller import Controller
 from pescea.discovery import DiscoveryService
 
 from .conftest import fireplaces, patched_open_datagram_endpoint
@@ -39,15 +39,15 @@ async def test_service_basics(mocker):
 
     for c in discovery.controllers:
         ctrl = discovery.controllers[c]  # Type: Controller
-        assert ctrl.state == State.READY
+        assert ctrl.state == Controller.State.READY
         assert ctrl.device_ip == fireplaces[ctrl.device_uid]["IPAddress"]
         assert ctrl.is_on == fireplaces[ctrl.device_uid]["FireIsOn"]
         if fireplaces[ctrl.device_uid]["FanBoost"]:
-            assert ctrl.fan == Fan.FAN_BOOST
+            assert ctrl.fan == Controller.Fan.FAN_BOOST
         elif fireplaces[ctrl.device_uid]["FlameEffect"]:
-            assert ctrl.fan == Fan.FLAME_EFFECT
+            assert ctrl.fan == Controller.Fan.FLAME_EFFECT
         else:
-            assert ctrl.fan == Fan.AUTO
+            assert ctrl.fan == Controller.Fan.AUTO
         assert ctrl.desired_temp == fireplaces[ctrl.device_uid]["DesiredTemp"]
         assert ctrl.current_temp == fireplaces[ctrl.device_uid]["CurrentTemp"]
 
@@ -91,18 +91,18 @@ async def test_controller_updates(mocker):
 
     for c in discovery.controllers:
         ctrl = discovery.controllers[c]  # Type: Controller
-        assert ctrl.state == State.READY
+        assert ctrl.state == Controller.State.READY
 
         assert ctrl.is_on == fireplaces[ctrl.device_uid]["FireIsOn"]
         await ctrl.set_on(not ctrl.is_on)
-        assert ctrl.state == State.BUSY
+        assert ctrl.state == Controller.State.BUSY
 
-        if ctrl.fan == Fan.FLAME_EFFECT:
-            await ctrl.set_fan(Fan.AUTO)
-        elif ctrl.fan == Fan.AUTO:
-            await ctrl.set_fan(Fan.FAN_BOOST)
+        if ctrl.fan == Controller.Fan.FLAME_EFFECT:
+            await ctrl.set_fan(Controller.Fan.AUTO)
+        elif ctrl.fan == Controller.Fan.AUTO:
+            await ctrl.set_fan(Controller.Fan.FAN_BOOST)
         else:
-            await ctrl.set_fan(Fan.FLAME_EFFECT)
+            await ctrl.set_fan(Controller.Fan.FLAME_EFFECT)
 
         await ctrl.set_desired_temp(ctrl.min_temp)
 
@@ -116,15 +116,15 @@ async def test_controller_updates(mocker):
 
     for c in discovery.controllers:
         ctrl = discovery.controllers[c]  # Type: Controller
-        assert ctrl.state == State.READY
+        assert ctrl.state == Controller.State.READY
         assert ctrl.device_ip == fireplaces[ctrl.device_uid]["IPAddress"]
         assert ctrl.is_on == fireplaces[ctrl.device_uid]["FireIsOn"]
         if fireplaces[ctrl.device_uid]["FanBoost"]:
-            assert ctrl.fan == Fan.FAN_BOOST
+            assert ctrl.fan == Controller.Fan.FAN_BOOST
         elif fireplaces[ctrl.device_uid]["FlameEffect"]:
-            assert ctrl.fan == Fan.FLAME_EFFECT
+            assert ctrl.fan == Controller.Fan.FLAME_EFFECT
         else:
-            assert ctrl.fan == Fan.AUTO
+            assert ctrl.fan == Controller.Fan.AUTO
         assert ctrl.desired_temp == fireplaces[ctrl.device_uid]["DesiredTemp"]
         assert ctrl.current_temp == fireplaces[ctrl.device_uid]["CurrentTemp"]
 

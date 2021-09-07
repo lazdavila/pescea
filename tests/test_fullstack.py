@@ -3,7 +3,7 @@
 from asyncio import Semaphore, sleep
 from pytest import mark
 
-from pescea.controller import Controller, Fan, State
+from pescea.controller import Controller
 from pescea.discovery import Listener, discovery_service
 
 from .conftest import fireplaces, patched_open_datagram_endpoint
@@ -75,7 +75,7 @@ async def test_full_stack(mocker):
             ctrl = listener.controllers[c]  # Type: Controller
             uid = ctrl.device_uid
 
-            assert ctrl.state == State.READY
+            assert ctrl.state == Controller.State.READY
 
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
@@ -90,10 +90,10 @@ async def test_full_stack(mocker):
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
-            assert ctrl.state == State.BUSY
+            assert ctrl.state == Controller.State.BUSY
             await sleep(0.6)
 
-            assert ctrl.state == State.READY
+            assert ctrl.state == Controller.State.READY
             assert ctrl.is_on == new_on
 
             # test still getting updates
@@ -101,7 +101,7 @@ async def test_full_stack(mocker):
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
-            for fan in Fan:
+            for fan in Controller.Fan:
                 await ctrl.set_fan(fan)
 
                 # test still updating
@@ -121,7 +121,7 @@ async def test_full_stack(mocker):
             assert listener.updates[uid].locked()
 
             await listener.disconnections[ctrl.device_uid].acquire()
-            assert ctrl.state == State.DISCONNECTED
+            assert ctrl.state == Controller.State.DISCONNECTED
             assert listener.updates[uid].locked()
 
             # test scan and IP address change
@@ -130,7 +130,7 @@ async def test_full_stack(mocker):
             fireplaces[ctrl.device_uid]["Responsive"] = True
 
             await listener.reconnections[ctrl.device_uid].acquire()
-            assert ctrl.state == State.READY
+            assert ctrl.state == Controller.State.READY
             assert ctrl.device_ip == new_ip
             await listener.updates[uid].acquire()
 

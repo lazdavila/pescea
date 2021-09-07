@@ -1,7 +1,4 @@
-from asyncio import Event, sleep, Semaphore
-from asyncio.transports import DatagramTransport
-from async_timeout import timeout
-
+from asyncio import Semaphore
 from pescea.datagram import CONTROLLER_PORT
 from pescea.message import Message, CommandID, ResponseID, expected_response
 

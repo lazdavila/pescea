@@ -4,7 +4,7 @@ from asyncio import Semaphore, sleep
 from pytest import mark
 from pprint import PrettyPrinter
 
-from pescea.controller import Controller, Fan, State, ON_OFF_BUSY_WAIT_TIME
+from pescea.controller import Controller, ON_OFF_BUSY_WAIT_TIME
 from pescea.discovery import Listener, discovery_service
 
 
@@ -71,7 +71,7 @@ async def test_live_fireplace(mocker):
 
             await listener.updates[uid].acquire()
 
-            assert ctrl.state == State.READY
+            assert ctrl.state == Controller.State.READY
 
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
@@ -89,7 +89,7 @@ async def test_live_fireplace(mocker):
 
             assert ctrl.is_on
 
-            for fan in Fan:
+            for fan in Controller.Fan:
                 print("Requesting set Fan to: ", fan)
                 await ctrl.set_fan(fan)
                 await sleep(2.0)
@@ -120,13 +120,13 @@ async def test_live_fireplace(mocker):
             # reset to reasonable values and turn off
 
             print("Requesting set Fan to: AUTO")
-            await ctrl.set_fan(Fan.AUTO)
+            await ctrl.set_fan(Controller.Fan.AUTO)
             await sleep(2.0)
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
-            assert ctrl.fan == Fan.AUTO
+            assert ctrl.fan == Controller.Fan.AUTO
 
             print("Requesting desired temperature of: ", 20.0)
             await ctrl.set_desired_temp(20.0)

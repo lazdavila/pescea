@@ -3,11 +3,7 @@ from pytest import mark
 import asyncio
 from asyncio import sleep
 
-from pescea.controller import (
-    Fan,
-    State,
-    Controller,
-)
+from pescea.controller import Controller
 from pescea.discovery import DiscoveryService
 
 from .conftest import fireplaces, patched_open_datagram_endpoint
@@ -37,42 +33,42 @@ async def test_controller_basics(mocker):
     assert controller.device_ip == device_ip
     assert controller.device_uid == device_uid
     assert controller.discovery == discovery
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
 
     was_on = controller.is_on
     await controller.set_on(True)
     if not was_on:
         # Should still be BUSY waiting
-        assert controller.state == State.BUSY
+        assert controller.state == Controller.State.BUSY
         assert controller.is_on  # saved the setting
         await sleep(0.5)
-        assert controller.state == State.READY
+        assert controller.state == Controller.State.READY
 
     assert controller.is_on
 
     await controller.set_on(False)
     # Should again be BUSY waiting
-    assert controller.state == State.BUSY
+    assert controller.state == Controller.State.BUSY
     assert not controller.is_on  # saved the setting
 
     await sleep(0.5)
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
     assert not controller.is_on
 
     # Test all Fan transitions
-    for from_fan in Fan:
-        for to_fan in Fan:
+    for from_fan in Controller.Fan:
+        for to_fan in Controller.Fan:
             await controller.set_fan(from_fan)
             assert controller.fan == from_fan
-            assert controller.state == State.READY
+            assert controller.state == Controller.State.READY
             await controller.set_fan(to_fan)
             assert controller.fan == to_fan
-            assert controller.state == State.READY
+            assert controller.state == Controller.State.READY
 
     for temp in range(int(controller.min_temp), int(controller.max_temp)):
         await controller.set_desired_temp(float(temp))
         assert int(controller.desired_temp) == temp
-        assert controller.state == State.READY
+        assert controller.state == Controller.State.READY
 
     assert controller.current_temp is not None
 
@@ -108,19 +104,19 @@ async def test_controller_change_address(mocker):
     assert controller.device_ip == device_ip
     assert controller.device_uid == device_uid
     assert controller.discovery == discovery
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
 
     new_ip = "10.10.10.10"
     fireplaces[device_uid]["IPAddress"] = new_ip
 
     await sleep(0.8)
-    assert controller.state == State.DISCONNECTED
+    assert controller.state == Controller.State.DISCONNECTED
 
     controller.refresh_address(new_ip)
 
     # Allow time to poll for status and check still get response
     await sleep(0.3)
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
     assert controller.device_ip == new_ip
 
     # Teardown:
@@ -153,16 +149,16 @@ async def test_controller_poll(mocker):
     assert controller.device_ip == device_ip
     assert controller.device_uid == device_uid
     assert controller.discovery == discovery
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
 
     was_on = controller.is_on
     await controller.set_on(True)
     if not was_on:
         # Should still be BUSY waiting
-        assert controller.state == State.BUSY
+        assert controller.state == Controller.State.BUSY
         assert controller.is_on  # Saved, but not yet committed
         await sleep(0.5)
-        assert controller.state == State.READY
+        assert controller.state == Controller.State.READY
 
     assert controller.is_on
 
@@ -200,15 +196,15 @@ async def test_controller_disconnect_reconnect(mocker):
     controller = Controller(discovery, device_uid, device_ip)
     await controller.initialize()
     assert controller.device_ip == device_ip
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
 
     fireplaces[device_uid]["Responsive"] = False
 
     await sleep(0.2)
-    assert controller.state == State.NON_RESPONSIVE
+    assert controller.state == Controller.State.NON_RESPONSIVE
 
     await sleep(0.3)
-    assert controller.state == State.DISCONNECTED
+    assert controller.state == Controller.State.DISCONNECTED
 
     new_ip = fireplaces[list(fireplaces.keys())[-1]]["IPAddress"]
     controller.refresh_address(new_ip)
@@ -217,7 +213,7 @@ async def test_controller_disconnect_reconnect(mocker):
     fireplaces[device_uid]["Responsive"] = True
     await sleep(0.6)
 
-    assert controller.state == State.READY
+    assert controller.state == Controller.State.READY
 
     # clean shutdown
     await controller.close()

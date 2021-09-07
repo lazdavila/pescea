@@ -56,7 +56,7 @@ class Controller:
         AUTO = "Auto"
         FAN_BOOST = "FanBoost"
 
-    class State(Enum):
+    class pescea(Enum):
         """Controller states:
 
         Under normal operations:
@@ -85,7 +85,7 @@ class Controller:
 
         IP_ADDRESS = "IPAddress"
         DEVICE_UID = "DeviceUId"
-        CONTROLLER_STATE = "State"
+        CONTROLLER_STATE = "pescea"
         HAS_NEW_TIMERS = "HasNewTimers"
         FIRE_IS_ON = "FireIsOn"
         FAN_MODE = "FanMode"
@@ -206,7 +206,7 @@ class Controller:
         return self._discovery
 
     @property
-    def state(self) -> State:
+    def state(self) -> pescea:
         """Controller state"""
         return self._state
 
@@ -329,15 +329,13 @@ class Controller:
                 if response.fan_boost_is_on:
                     self._system_settings[
                         Controller.Settings.FAN_MODE
-                    ] = Controller.Fan.FAN_BOOST
+                    ] = self.Fan.FAN_BOOST
                 elif response.flame_effect:
                     self._system_settings[
                         Controller.Settings.FAN_MODE
-                    ] = Controller.Fan.FLAME_EFFECT
+                    ] = self.Fan.FLAME_EFFECT
                 else:
-                    self._system_settings[
-                        Controller.Settings.FAN_MODE
-                    ] = Controller.Fan.AUTO
+                    self._system_settings[Controller.Settings.FAN_MODE] = self.Fan.AUTO
                 self._system_settings[
                     Controller.Settings.FIRE_IS_ON
                 ] = response.fire_is_on
@@ -358,11 +356,11 @@ class Controller:
                     )
 
                 if response.fan_boost_is_on:
-                    response_fan = Controller.Fan.FAN_BOOST
+                    response_fan = self.Fan.FAN_BOOST
                 elif response.flame_effect:
-                    response_fan = Controller.Fan.FLAME_EFFECT
+                    response_fan = self.Fan.FLAME_EFFECT
                 else:
-                    response_fan = Controller.Fan.AUTO
+                    response_fan = self.Fan.AUTO
                 if response_fan != self._system_settings[Controller.Settings.FAN_MODE]:
                     await self._set_system_state(
                         Controller.Settings.FAN_MODE,
@@ -491,17 +489,17 @@ class Controller:
             #
             # To AUTO:
             # 1. turn off FAN_BOOST
-            if value == Controller.Fan.AUTO:
+            if value == self.Fan.AUTO:
                 command = CommandID.FAN_BOOST_OFF
 
             # To FAN_BOOST:
             # 1. Turn off FLAME_EFFECT
-            elif value == Controller.Fan.FAN_BOOST:
+            elif value == self.Fan.FAN_BOOST:
                 command = CommandID.FLAME_EFFECT_OFF
 
             # To FLAME_EFFECT:
             # 1. Turn off FAN_BOOST
-            elif value == Controller.Fan.FLAME_EFFECT:
+            elif value == self.Fan.FLAME_EFFECT:
                 command = CommandID.FAN_BOOST_OFF
 
         else:
@@ -535,12 +533,12 @@ class Controller:
             #
             # To AUTO:
             # 2. turn off FLAME_EFFECT
-            if value == Controller.Fan.AUTO:
+            if value == self.Fan.AUTO:
                 command = CommandID.FLAME_EFFECT_OFF
 
             # To FAN_BOOST:
             # 2. Turn on FAN_BOOST
-            elif value == Controller.Fan.FAN_BOOST:
+            elif value == self.Fan.FAN_BOOST:
                 command = CommandID.FAN_BOOST_ON
 
             # To FLAME_EFFECT:
