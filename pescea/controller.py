@@ -418,7 +418,10 @@ class Controller:
                 if responses[this_response].response_id == expected_response(
                     CommandID.STATUS_PLEASE
                 ):
-                    # all good
+                    _LOG.debug(
+                        "_request_status - send_command(success): %s",
+                        str(self.device_uid),
+                    )
                     self._last_response = time()
                     return responses[this_response]
         except ConnectionError:
@@ -426,6 +429,11 @@ class Controller:
         # If we get here... did not receive a response or not valid
         if self._state != Controller.State.DISCONNECTED:
             self._state = Controller.State.NON_RESPONSIVE
+        _LOG.debug(
+            "_request_status - send_command(failed): %s (now: %s)",
+            str(self.device_uid),
+            self._state,
+        )
         return None
 
     def refresh_address(self, address):

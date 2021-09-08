@@ -80,7 +80,6 @@ class Datagram:
                     "0.0.0.0",
                     CONTROLLER_PORT,
                     loop=self._event_loop,
-                    allow_broadcast=broadcast,
                 )
                 remote = await open_remote_endpoint(
                     self._ip,
@@ -111,11 +110,21 @@ class Datagram:
                                 responses[addr] = response
                         if not broadcast:
                             break
+                    local.close()
             except (asyncio.TimeoutError, ValueError):
                 pass
-            local.close()
+            finally:
+                if not remote.closed:
+                    remote.close()
+                if not local.closed:
+                    local.close()
 
         if len(responses) == 0:
+            _LOG.debug(
+                "Unable to send UDP message - Local endpoint closed:%s, Remote endpoint closed:%s",
+                local.closed,
+                remote.closed,
+            )
             raise ConnectionError("Unable to send/receive UDP message")
 
         return responses

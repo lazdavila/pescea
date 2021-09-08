@@ -59,6 +59,7 @@ class SimulatedComms:
         self.broadcast = None
         self.local_addr = None
         self.loop = None
+        self.closed = False
 
     async def initialize(self, host, port, remote, endpoint_factory, loop, **kwargs):
 
@@ -166,7 +167,7 @@ class SimulatedComms:
             self.responses_ready.release()
 
     def close(self):
-        pass
+        self.closed = True
 
     async def receive(self):
         await self.responses_ready.acquire()
