@@ -114,9 +114,9 @@ class Datagram:
             except (asyncio.TimeoutError, ValueError):
                 pass
             finally:
-                if not remote.closed:
+                if remote is not None and not remote.closed:
                     remote.close()
-                if not local.closed:
+                if local is not None and not local.closed:
                     local.close()
 
         if len(responses) == 0:
