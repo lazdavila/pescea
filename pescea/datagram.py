@@ -72,6 +72,8 @@ class Datagram:
         message = Message(command=command, set_temp=data)
         responses = dict()  # type: Responses
         broadcast = command == CommandID.SEARCH_FOR_FIRES
+        local = None
+        remote = None
 
         # set up receiver before we send anything
         async with self.sending_lock:
