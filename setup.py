@@ -8,7 +8,7 @@ with open("README.md", "r") as fh:
 setup(
     name="pescea",
     packages=find_packages(exclude=["tests", "tests.*"]),
-    version="1.0.6",
+    version="1.0.7",
     license="gpl-3.0",
     description="A python interface to the Escea fireplace controllers",
     long_description=LONG_DESCRIPTION,
@@ -16,7 +16,7 @@ setup(
     author="Laz Davila",
     author_email="laz.davila@gmail.com",
     url="https://github.com/lazdavila/pescea",
-    download_url="https://github.com/lazdavila/pescea/archive/refs/tags/v1.0.6.tar.gz",
+    download_url="https://github.com/lazdavila/pescea/archive/refs/tags/v1.0.7.tar.gz",
     keywords=[
         "Escea",
         "IoT",
