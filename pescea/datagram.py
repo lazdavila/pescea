@@ -79,13 +79,13 @@ class Datagram:
         async with self.sending_lock:
             try:
                 local = await open_local_endpoint(
-                    "0.0.0.0",
-                    CONTROLLER_PORT,
+                    port=CONTROLLER_PORT,
                     loop=self._event_loop,
+                    reuse_port=True,
                 )
                 remote = await open_remote_endpoint(
-                    self._ip,
-                    CONTROLLER_PORT,
+                    host=self._ip,
+                    port=CONTROLLER_PORT,
                     loop=self._event_loop,
                     allow_broadcast=broadcast,
                 )
@@ -124,8 +124,8 @@ class Datagram:
         if len(responses) == 0:
             _LOG.debug(
                 "Unable to send UDP message - Local endpoint closed:%s, Remote endpoint closed:%s",
-                local.closed,
-                remote.closed,
+                "None" if local is None else local.closed,
+                "None" if remote is None else remote.closed,
             )
             raise ConnectionError("Unable to send/receive UDP message")
 

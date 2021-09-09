@@ -10,7 +10,7 @@ from async_timeout import timeout
 from copy import deepcopy
 
 # Pescea imports:
-from pescea.message import (
+from .message import (
     Message,
     CommandID,
     ResponseID,
@@ -18,7 +18,7 @@ from pescea.message import (
     MAX_SET_TEMP,
     expected_response,
 )
-from pescea.datagram import Datagram
+from .datagram import Datagram
 
 _LOG = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class Controller:
             self._discovery.loop, device_ip, self._discovery.sending_lock
         )
 
-        self._loop_interrupt_condition = asyncio.Condition(loop=self._discovery.loop)
+        self._interrupt_poll_loop_sleep = asyncio.Condition(loop=self._discovery.loop)
 
         self._initialised = False
 
@@ -149,8 +149,8 @@ class Controller:
             return
 
         self._closed = True
-        async with self._loop_interrupt_condition:
-            self._loop_interrupt_condition.notify()
+        async with self._interrupt_poll_loop_sleep:
+            self._interrupt_poll_loop_sleep.notify()
         await self._poll_loop_task
 
     async def _poll_loop(self) -> None:
@@ -185,8 +185,8 @@ class Controller:
             try:
                 # Sleep for poll time, allow early wakeup
                 async with timeout(sleep_time):
-                    async with self._loop_interrupt_condition:
-                        await self._loop_interrupt_condition.wait()
+                    async with self._interrupt_poll_loop_sleep:
+                        await self._interrupt_poll_loop_sleep.wait()
             except asyncio.TimeoutError:
                 pass
 
@@ -446,8 +446,8 @@ class Controller:
 
         # signal the poll loop to wake up and ask for new status
         async def signal_loop(self):
-            async with self._loop_interrupt_condition:
-                self._loop_interrupt_condition.notify()
+            async with self._interrupt_poll_loop_sleep:
+                self._interrupt_poll_loop_sleep.notify()
 
         self._discovery.loop.create_task(signal_loop(self))
 
@@ -579,7 +579,8 @@ class Controller:
         # Need to refresh immediately after setting
         # (unless synching, in which case the poll loop will update)
         if not sync:
-            await self._refresh_system()
+            async with self._interrupt_poll_loop_sleep:
+                self._interrupt_poll_loop_sleep.notify()
 
         # If get here, and just toggled the fireplace power... need to buffer for a while
         if state == Controller.Settings.FIRE_IS_ON:
