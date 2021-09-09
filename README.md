@@ -14,7 +14,7 @@ Note: The above documents are copyright of Escea
 This package is not a standalone application for end user implementation.
 
 The aim of this package is to be used by software developers and integrators to implement
-the Escea interface on home automation platforms.
+the Escea interface on home automation platforms (principally Home Assistant )
 
 ## Credit
 

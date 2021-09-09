@@ -231,6 +231,9 @@ class Controller:
     async def set_fan(self, value: Fan) -> None:
         """The fan level.
         Does not return until command has been sent to the fireplace.
+
+        Note: A peculiarity of this fireplace is that if we change the fan
+        setting while off, it actually turns the fire on.
         """
         await self._set_system_state(Controller.Settings.FAN_MODE, value)
 
@@ -579,8 +582,7 @@ class Controller:
         # Need to refresh immediately after setting
         # (unless synching, in which case the poll loop will update)
         if not sync:
-            async with self._interrupt_poll_loop_sleep:
-                self._interrupt_poll_loop_sleep.notify()
+            await self._refresh_system()
 
         # If get here, and just toggled the fireplace power... need to buffer for a while
         if state == Controller.Settings.FIRE_IS_ON:
