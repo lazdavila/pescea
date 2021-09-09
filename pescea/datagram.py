@@ -12,7 +12,7 @@ from async_timeout import timeout
 from typing import Any, Dict
 
 # Pescea imports:
-from .message import Message, CommandID, ResponseID, expected_response
+from .message import Message, CommandID, expected_response
 from .udp_endpoints import open_local_endpoint, open_remote_endpoint
 
 
