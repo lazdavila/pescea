@@ -305,112 +305,116 @@ class Controller:
                         new state DISCONNECTED
                         notify discovery disconnected
         """
-        if self._state == Controller.State.BUSY and time() < self._busy_end_time:
-            return
+        if self._state != Controller.State.BUSY or time() >= self._busy_end_time:
+            # Ok to fetch new status
 
-        prior_state = self._state
-        response = await self._request_status()
-        if (response is not None) and (response.response_id == ResponseID.STATUS):
-            # We have a valid response - the controller is communicating
+            prior_state = self._state
+            response = await self._request_status()
+            if (response is not None) and (response.response_id == ResponseID.STATUS):
+                # We have a valid response - the controller is communicating
 
-            self._state = Controller.State.READY
+                self._state = Controller.State.READY
 
-            # These values are readonly, so copy them in any case
-            self._system_settings[
-                Controller.Settings.HAS_NEW_TIMERS
-            ] = response.has_new_timers
-            self._system_settings[
-                Controller.Settings.CURRENT_TEMP
-            ] = response.current_temp
-
-            if prior_state == Controller.State.READY:
-
-                # Normal operation, update our internal values
+                # These values are readonly, so copy them in any case
                 self._system_settings[
-                    Controller.Settings.DESIRED_TEMP
-                ] = response.desired_temp
-                if response.fan_boost_is_on:
-                    self._system_settings[
-                        Controller.Settings.FAN_MODE
-                    ] = Controller.Fan.FAN_BOOST
-                elif response.flame_effect:
-                    self._system_settings[
-                        Controller.Settings.FAN_MODE
-                    ] = Controller.Fan.FLAME_EFFECT
-                else:
-                    self._system_settings[
-                        Controller.Settings.FAN_MODE
-                    ] = Controller.Fan.AUTO
+                    Controller.Settings.HAS_NEW_TIMERS
+                ] = response.has_new_timers
                 self._system_settings[
-                    Controller.Settings.FIRE_IS_ON
-                ] = response.fire_is_on
+                    Controller.Settings.CURRENT_TEMP
+                ] = response.current_temp
 
-            else:
+                if prior_state == Controller.State.READY:
 
-                # We have come back to READY state.
-                # We need to try to sync buffered settings to fireplace
+                    # Normal operation, update our internal values
+                    self._system_settings[
+                        Controller.Settings.DESIRED_TEMP
+                    ] = response.desired_temp
+                    if response.fan_boost_is_on:
+                        self._system_settings[
+                            Controller.Settings.FAN_MODE
+                        ] = Controller.Fan.FAN_BOOST
+                    elif response.flame_effect:
+                        self._system_settings[
+                            Controller.Settings.FAN_MODE
+                        ] = Controller.Fan.FLAME_EFFECT
+                    else:
+                        self._system_settings[
+                            Controller.Settings.FAN_MODE
+                        ] = Controller.Fan.AUTO
+                    self._system_settings[
+                        Controller.Settings.FIRE_IS_ON
+                    ] = response.fire_is_on
 
-                if (
-                    response.desired_temp
-                    != self._system_settings[Controller.Settings.DESIRED_TEMP]
-                ):
-                    await self._set_system_state(
-                        Controller.Settings.DESIRED_TEMP,
-                        self._system_settings[Controller.Settings.DESIRED_TEMP],
-                        sync=True,
-                    )
-
-                if response.fan_boost_is_on:
-                    response_fan = Controller.Fan.FAN_BOOST
-                elif response.flame_effect:
-                    response_fan = Controller.Fan.FLAME_EFFECT
                 else:
-                    response_fan = Controller.Fan.AUTO
-                if response_fan != self._system_settings[Controller.Settings.FAN_MODE]:
-                    await self._set_system_state(
-                        Controller.Settings.FAN_MODE,
-                        self._system_settings[Controller.Settings.FAN_MODE],
-                        sync=True,
-                    )
 
-                # Do power last, as then we go to BUSY state
-                if (
-                    response.fire_is_on
-                    != self._system_settings[Controller.Settings.FIRE_IS_ON]
-                ):
-                    await self._set_system_state(
-                        Controller.Settings.FIRE_IS_ON,
-                        self._system_settings[Controller.Settings.FIRE_IS_ON],
-                        sync=True,
-                    )
+                    # We have come back to READY state.
+                    # We need to try to sync buffered settings to fireplace
 
-                if prior_state == Controller.State.DISCONNECTED:
-                    self._discovery.controller_reconnected(self)
-
-            if notify:
-                # send an update to discovery if there have been any changes
-                # or if haven't sent one in last NOTIFY_REFRESH_INTERVAL
-                changes_found = False
-                for entry in self._system_settings:
-                    if not entry in self._prior_settings or (
-                        self._prior_settings[entry] != self._system_settings[entry]
+                    if (
+                        response.desired_temp
+                        != self._system_settings[Controller.Settings.DESIRED_TEMP]
                     ):
-                        changes_found = True
-                        break
-                if changes_found or (
-                    time() - self._last_update > NOTIFY_REFRESH_INTERVAL
-                ):
-                    self._last_update = time()
-                    self._prior_settings = deepcopy(self._system_settings)
-                    self._discovery.controller_update(self)
-        else:
-            # No / invalid response, need to check if we need to change state
-            if time() - self._last_response < RETRY_TIMEOUT:
-                self._state = Controller.State.NON_RESPONSIVE
+                        await self._set_system_state(
+                            Controller.Settings.DESIRED_TEMP,
+                            self._system_settings[Controller.Settings.DESIRED_TEMP],
+                            sync=True,
+                        )
+
+                    if response.fan_boost_is_on:
+                        response_fan = Controller.Fan.FAN_BOOST
+                    elif response.flame_effect:
+                        response_fan = Controller.Fan.FLAME_EFFECT
+                    else:
+                        response_fan = Controller.Fan.AUTO
+                    if (
+                        response_fan
+                        != self._system_settings[Controller.Settings.FAN_MODE]
+                    ):
+                        await self._set_system_state(
+                            Controller.Settings.FAN_MODE,
+                            self._system_settings[Controller.Settings.FAN_MODE],
+                            sync=True,
+                        )
+
+                    # Do power last, as then we go to BUSY state
+                    if (
+                        response.fire_is_on
+                        != self._system_settings[Controller.Settings.FIRE_IS_ON]
+                    ):
+                        await self._set_system_state(
+                            Controller.Settings.FIRE_IS_ON,
+                            self._system_settings[Controller.Settings.FIRE_IS_ON],
+                            sync=True,
+                        )
+
+                    if prior_state == Controller.State.DISCONNECTED:
+                        self._discovery.controller_reconnected(self)
+
             else:
-                self._state = Controller.State.DISCONNECTED
-                if prior_state != Controller.State.DISCONNECTED:
-                    self._discovery.controller_disconnected(self, TimeoutError)
+                # No / invalid response, need to check if we need to change state
+                if time() - self._last_response < RETRY_TIMEOUT:
+                    self._state = Controller.State.NON_RESPONSIVE
+                else:
+                    self._state = Controller.State.DISCONNECTED
+                    if prior_state != Controller.State.DISCONNECTED:
+                        self._discovery.controller_disconnected(self, TimeoutError)
+
+        if notify and self._state != Controller.State.DISCONNECTED:
+            # send an update to discovery if there have been any changes
+            # or if haven't sent one in last NOTIFY_REFRESH_INTERVAL
+            changes_found = False
+            for entry in self._system_settings:
+                if not entry in self._prior_settings or (
+                    self._prior_settings[entry] != self._system_settings[entry]
+                ):
+                    changes_found = True
+                    break
+            if changes_found or (
+                time() - self._last_update > NOTIFY_REFRESH_INTERVAL
+            ):
+                self._last_update = time()
+                self._prior_settings = deepcopy(self._system_settings)
+                self._discovery.controller_update(self)
 
     async def _request_status(self) -> Message:
         """Send command to fireplace requesting current status"""
@@ -464,7 +468,7 @@ class Controller:
             sync: state/value have been buffered -> send to fireplace
         """
 
-        # ignore if we are not forcing the synch, and value matches already
+        # nothing to do if not synching our state, and already have right state
         if (not sync) and (self._system_settings[state] == value):
             return
 
@@ -480,104 +484,103 @@ class Controller:
         # save the new value internally
         self._system_settings[state] = value
 
-        if (not sync) and (self._state != Controller.State.READY):
-            # We've saved the new value.... just can't send it to the controller yet
-            return
+        # send it to the fireplace if asked to sync, or fireplace is not busy
+        if sync or self._state == Controller.State.READY:
 
-        command = None
+            command = None
 
-        if state == Controller.Settings.FIRE_IS_ON:
-            if value:
-                command = CommandID.POWER_ON
+            if state == Controller.Settings.FIRE_IS_ON:
+                if value:
+                    command = CommandID.POWER_ON
+                else:
+                    command = CommandID.POWER_OFF
+
+            elif state == Controller.Settings.DESIRED_TEMP:
+                command = CommandID.NEW_SET_TEMP
+
+            elif state == Controller.Settings.FAN_MODE:
+
+                # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
+                # Any change to Fan will take one or two separate commands:
+                #
+                # To AUTO:
+                # 1. turn off FAN_BOOST
+                if value == Controller.Fan.AUTO:
+                    command = CommandID.FAN_BOOST_OFF
+
+                # To FAN_BOOST:
+                # 1. Turn off FLAME_EFFECT
+                elif value == Controller.Fan.FAN_BOOST:
+                    command = CommandID.FLAME_EFFECT_OFF
+
+                # To FLAME_EFFECT:
+                # 1. Turn off FAN_BOOST
+                elif value == Controller.Fan.FLAME_EFFECT:
+                    command = CommandID.FAN_BOOST_OFF
+
             else:
-                command = CommandID.POWER_OFF
+                raise (AttributeError, "Unexpected state: {0}".format(state))
 
-        elif state == Controller.Settings.DESIRED_TEMP:
-            command = CommandID.NEW_SET_TEMP
+            if command is not None:
+                valid_response = False
+                try:
+                    responses = await self._datagram.send_command(command, value)
+                    if (len(responses) > 0) and (
+                        responses[next(iter(responses))].response_id
+                        == expected_response(command)
+                    ):
+                        valid_response = True
+                        _LOG.debug(
+                            "_set_system_state - send_command(success): %s -> %s",
+                            str(self.device_uid),
+                            str(command),
+                        )
 
-        elif state == Controller.Settings.FAN_MODE:
+                except ConnectionError:
+                    pass
+                if valid_response:
+                    self._last_response = time()
+                else:
+                    return
 
-            # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
-            # Any change to Fan will take one or two separate commands:
-            #
-            # To AUTO:
-            # 1. turn off FAN_BOOST
-            if value == Controller.Fan.AUTO:
-                command = CommandID.FAN_BOOST_OFF
+            if state == Controller.Settings.FAN_MODE:
+                # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
+                # Any change will take one or two separate commands:
+                #
+                # To AUTO:
+                # 2. turn off FLAME_EFFECT
+                if value == Controller.Fan.AUTO:
+                    command = CommandID.FLAME_EFFECT_OFF
 
-            # To FAN_BOOST:
-            # 1. Turn off FLAME_EFFECT
-            elif value == Controller.Fan.FAN_BOOST:
-                command = CommandID.FLAME_EFFECT_OFF
+                # To FAN_BOOST:
+                # 2. Turn on FAN_BOOST
+                elif value == Controller.Fan.FAN_BOOST:
+                    command = CommandID.FAN_BOOST_ON
 
-            # To FLAME_EFFECT:
-            # 1. Turn off FAN_BOOST
-            elif value == Controller.Fan.FLAME_EFFECT:
-                command = CommandID.FAN_BOOST_OFF
+                # To FLAME_EFFECT:
+                # 2. Turn on FLAME_EFFECT
+                else:
+                    command = CommandID.FLAME_EFFECT_ON
 
-        else:
-            raise (AttributeError, "Unexpected state: {0}".format(state))
-
-        if command is not None:
-            valid_response = False
-            try:
-                responses = await self._datagram.send_command(command, value)
-                if (len(responses) > 0) and (
-                    responses[next(iter(responses))].response_id
-                    == expected_response(command)
-                ):
-                    valid_response = True
-                    _LOG.debug(
-                        "_set_system_state - send_command(success): %s -> %s",
-                        str(self.device_uid),
-                        str(command),
-                    )
-
-            except ConnectionError:
-                pass
-            if valid_response:
-                self._last_response = time()
-            else:
-                return
-
-        if state == Controller.Settings.FAN_MODE:
-            # Fan is implemented via separate FLAME_EFFECT and FAN_BOOST commands
-            # Any change will take one or two separate commands:
-            #
-            # To AUTO:
-            # 2. turn off FLAME_EFFECT
-            if value == Controller.Fan.AUTO:
-                command = CommandID.FLAME_EFFECT_OFF
-
-            # To FAN_BOOST:
-            # 2. Turn on FAN_BOOST
-            elif value == Controller.Fan.FAN_BOOST:
-                command = CommandID.FAN_BOOST_ON
-
-            # To FLAME_EFFECT:
-            # 2. Turn on FLAME_EFFECT
-            else:
-                command = CommandID.FLAME_EFFECT_ON
-
-            valid_response = False
-            try:
-                responses = await self._datagram.send_command(command, value)
-                if (len(responses) > 0) and (
-                    responses[next(iter(responses))].response_id
-                    == expected_response(command)
-                ):
-                    valid_response = True
-                    _LOG.debug(
-                        "_set_system_state - send_command(success): %s -> %s",
-                        str(self.device_uid),
-                        str(command),
-                    )
-            except ConnectionError:
-                pass
-            if valid_response:
-                self._last_response = time()
-            else:
-                return
+                valid_response = False
+                try:
+                    responses = await self._datagram.send_command(command, value)
+                    if (len(responses) > 0) and (
+                        responses[next(iter(responses))].response_id
+                        == expected_response(command)
+                    ):
+                        valid_response = True
+                        _LOG.debug(
+                            "_set_system_state - send_command(success): %s -> %s",
+                            str(self.device_uid),
+                            str(command),
+                        )
+                except ConnectionError:
+                    pass
+                if valid_response:
+                    self._last_response = time()
+                else:
+                    return
 
         # Need to refresh immediately after setting
         # (unless synching, in which case the poll loop will update)
