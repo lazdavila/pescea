@@ -366,15 +366,23 @@ class Controller:
                         response_fan = Controller.Fan.FLAME_EFFECT
                     else:
                         response_fan = Controller.Fan.AUTO
-                    if (
-                        response_fan
-                        != self._system_settings[Controller.Settings.FAN_MODE]
-                    ):
-                        await self._set_system_state(
-                            Controller.Settings.FAN_MODE,
-                            self._system_settings[Controller.Settings.FAN_MODE],
-                            sync=True,
-                        )
+                    if not self._system_settings[Controller.Settings.FIRE_IS_ON]:
+                        # Escea controller has a quirk that turning on
+                        # FAN_BOOST or FLAME_EFFECT actually turns on the fire
+                        # ... so must avoid setting fan when 'synching' if want it to stay off
+                        self._system_settings[
+                            Controller.Settings.FAN_MODE
+                        ] = response_fan
+                    else:
+                        if (
+                            response_fan
+                            != self._system_settings[Controller.Settings.FAN_MODE]
+                        ):
+                            await self._set_system_state(
+                                Controller.Settings.FAN_MODE,
+                                self._system_settings[Controller.Settings.FAN_MODE],
+                                sync=True,
+                            )
 
                     # Do power last, as then we go to BUSY state
                     if (
@@ -409,9 +417,7 @@ class Controller:
                 ):
                     changes_found = True
                     break
-            if changes_found or (
-                time() - self._last_update > NOTIFY_REFRESH_INTERVAL
-            ):
+            if changes_found or (time() - self._last_update > NOTIFY_REFRESH_INTERVAL):
                 self._last_update = time()
                 self._prior_settings = deepcopy(self._system_settings)
                 self._discovery.controller_update(self)

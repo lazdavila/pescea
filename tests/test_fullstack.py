@@ -1,6 +1,7 @@
 """Test Escea discovery service, controller and listeners"""
 
 from asyncio import Semaphore, sleep
+from datetime import datetime
 from pytest import mark
 
 from pescea.controller import Controller
@@ -45,20 +46,20 @@ async def test_full_stack(mocker):
                 self.updates[f] = Semaphore(value=0)
 
         def controller_discovered(self, ctrl: Controller):
-            print("Controller discovered: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller discovered: ", ctrl.device_uid)
             self.controllers[ctrl.device_uid] = ctrl
             self.discoveries[ctrl.device_uid].release()
 
         def controller_disconnected(self, ctrl: Controller, ex):
-            print("Controller disconnected: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller disconnected: ", ctrl.device_uid)
             self.disconnections[ctrl.device_uid].release()
 
         def controller_reconnected(self, ctrl: Controller):
-            print("Controller reconnected: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller reconnected: ", ctrl.device_uid)
             self.reconnections[ctrl.device_uid].release()
 
         def controller_update(self, ctrl: Controller):
-            print("Controller updated: {0}", ctrl.device_uid)
+            print(datetime.now().time(), " Controller updated: {0}", ctrl.device_uid)
             self.updates[ctrl.device_uid].release()
 
     listener = TestListener()
@@ -175,20 +176,20 @@ async def test_multiple_listeners(mocker):
                 self.updates[f] = Semaphore(value=0)
 
         def controller_discovered(self, ctrl: Controller):
-            print("Controller discovered: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller discovered: ", ctrl.device_uid)
             self.controllers[ctrl.device_uid] = ctrl
             self.discoveries[ctrl.device_uid].release()
 
         def controller_disconnected(self, ctrl: Controller, ex):
-            print("Controller disconnected: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller disconnected: ", ctrl.device_uid)
             self.disconnections[ctrl.device_uid].release()
 
         def controller_reconnected(self, ctrl: Controller):
-            print("Controller reconnected: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller reconnected: ", ctrl.device_uid)
             self.reconnections[ctrl.device_uid].release()
 
         def controller_update(self, ctrl: Controller):
-            print("Controller updated: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller updated: ", ctrl.device_uid)
             self.updates[ctrl.device_uid].release()
 
     listeners = {}
@@ -273,20 +274,20 @@ async def test_updates_while_busy(mocker):
                 self.updates[f] = Semaphore(value=0)
 
         def controller_discovered(self, ctrl: Controller):
-            print("Controller discovered: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller discovered: ", ctrl.device_uid)
             self.controllers[ctrl.device_uid] = ctrl
             self.discoveries[ctrl.device_uid].release()
 
         def controller_disconnected(self, ctrl: Controller, ex):
-            print("Controller disconnected: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller disconnected: ", ctrl.device_uid)
             self.disconnections[ctrl.device_uid].release()
 
         def controller_reconnected(self, ctrl: Controller):
-            print("Controller reconnected: ", ctrl.device_uid)
+            print(datetime.now().time(), " Controller reconnected: ", ctrl.device_uid)
             self.reconnections[ctrl.device_uid].release()
 
         def controller_update(self, ctrl: Controller):
-            print("Controller updated: {0}", ctrl.device_uid)
+            print(datetime.now().time(), " Controller updated: ", ctrl.device_uid)
             self.updates[ctrl.device_uid].release()
 
     listener = TestListener()
@@ -303,6 +304,8 @@ async def test_updates_while_busy(mocker):
             ctrl = listener.controllers[c]  # Type: Controller
             uid = ctrl.device_uid
 
+            print(datetime.now().time(), " Testing controller: ", uid)
+
             assert ctrl.state == Controller.State.READY
 
             while not listener.updates[uid].locked():
@@ -315,6 +318,7 @@ async def test_updates_while_busy(mocker):
             assert ctrl.state == Controller.State.READY
             assert not ctrl.is_on
 
+            print(datetime.now().time(), " Turning on: ", uid)
             await ctrl.set_on(True)
 
             # test changes while state is BUSY
@@ -324,25 +328,41 @@ async def test_updates_while_busy(mocker):
 
             assert ctrl.state == Controller.State.BUSY
             for fan in Controller.Fan:
+                print(
+                    datetime.now().time(),
+                    " Commanding controller ",
+                    uid,
+                    " fan to: ",
+                    fan,
+                )
                 await ctrl.set_fan(fan)
 
                 # test still updating
-                await listener.updates[uid].acquire()
                 while not listener.updates[uid].locked():
                     await listener.updates[uid].acquire()
 
-                print(ctrl.fan)
+                print(
+                    datetime.now().time(),
+                    " Controller ",
+                    uid,
+                    " reports fan is: ",
+                    ctrl.fan,
+                )
                 assert ctrl.fan == fan
                 assert ctrl.is_on
                 assert ctrl.state == Controller.State.BUSY
 
+            # Check final value survives after exiting BUSY mode
+            assert ctrl.state == Controller.State.BUSY
             fan = ctrl.fan
+            assert ctrl.is_on
+
             await sleep(1.6)
 
             await listener.updates[uid].acquire()
             while not listener.updates[uid].locked():
                 await listener.updates[uid].acquire()
 
+            assert ctrl.state == Controller.State.READY
             assert ctrl.fan == fan
             assert ctrl.is_on
-            assert ctrl.state == Controller.State.READY
