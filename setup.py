@@ -22,7 +22,11 @@ setup(
         "IoT",
     ],
     python_requires=">=3.7",
-    tests_require=["pytest"],
+    tests_require=[
+        "pytest",
+        "pytest-asyncio",
+        "pytest-mock",
+    ],
     install_requires=[
         "asyncio",
         "async_timeout",
