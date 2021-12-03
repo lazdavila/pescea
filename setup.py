@@ -24,7 +24,6 @@ setup(
     python_requires=">=3.7",
     tests_require=["pytest"],
     install_requires=[
-        "asyncio",
         "async_timeout",
     ],
     classifiers=[
