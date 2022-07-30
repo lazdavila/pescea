@@ -21,7 +21,7 @@ async def test_search_for_fires(mocker):
     datagram = Datagram(
         event_loop,
         device_ip="255.255.255.255",
-        sending_lock=asyncio.Lock(loop=event_loop),
+        sending_lock=asyncio.Lock(),
     )
 
     # Test steps:
@@ -48,7 +48,7 @@ async def test_get_status(mocker):
     datagram = Datagram(
         event_loop,
         device_ip=fireplaces[uid]["IPAddress"],
-        sending_lock=asyncio.Lock(loop=event_loop),
+        sending_lock=asyncio.Lock(),
     )
 
     # Test steps:
@@ -82,7 +82,7 @@ async def test_timeout_error(mocker):
     datagram = Datagram(
         event_loop,
         device_ip=fireplaces[uid]["IPAddress"],
-        sending_lock=asyncio.Lock(loop=event_loop),
+        sending_lock=asyncio.Lock(),
     )
     fireplaces[uid]["Responsive"] = False
 
