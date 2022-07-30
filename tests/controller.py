@@ -120,7 +120,7 @@ class Controller:
             self._discovery.loop, device_ip, self._discovery.sending_lock
         )
 
-        self._loop_interrupt_condition = asyncio.Condition(loop=self._discovery.loop)
+        self._loop_interrupt_condition = asyncio.Condition()
 
         self._initialised = False
 

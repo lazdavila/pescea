@@ -66,7 +66,7 @@ class SimulatedComms:
         assert port == CONTROLLER_PORT
         if (self.responses_ready is None) or (self.loop != loop):
             self.loop = loop
-            self.responses_ready = Semaphore(value=0, loop=loop)
+            self.responses_ready = Semaphore(value=0)
 
         if remote:
             if kwargs.__contains__("allow_broadcast"):

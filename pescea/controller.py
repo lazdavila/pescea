@@ -120,7 +120,7 @@ class Controller:
             self._discovery.loop, device_ip, self._discovery.sending_lock
         )
 
-        self._interrupt_poll_loop_sleep = asyncio.Condition(loop=self._discovery.loop)
+        self._interrupt_poll_loop_sleep = asyncio.Condition()
 
         self._initialised = False
 

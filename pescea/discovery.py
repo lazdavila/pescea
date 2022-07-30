@@ -145,16 +145,16 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
         _LOG.info("Starting discovery protocol")
         if not loop:
-            self.loop = asyncio.get_event_loop()
+            self.loop = asyncio.get_running_loop()
         else:
             self.loop = loop
-        self.sending_lock = Lock(loop=self.loop)
+        self.sending_lock = Lock()
 
         self._broadcast_ip = ip_addr
         self._datagram = Datagram(self.loop, ip_addr, self.sending_lock)
 
         self._discovery_started = False
-        self._scan_condition = Condition(loop=self.loop)  # type: Condition
+        self._scan_condition = Condition()  # type: Condition
 
         self._tasks = []  # type: List[Future]
 
