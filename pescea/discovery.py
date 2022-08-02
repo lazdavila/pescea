@@ -128,9 +128,9 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
     """Discovery protocol class. Not for external use."""
 
     def __init__(
-        self, loop: AbstractEventLoop = None, ip_addr: str = BROADCAST_IP_ADDR
+        self, ip_addr: str = BROADCAST_IP_ADDR
     ) -> None:
-        """Start the discovery protocol using the supplied loop.
+        """Start the discovery protocol 
 
         Args:
             - ip_addr: Address of controller (otherwise will broadcast)
@@ -144,10 +144,7 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
         self._close_task = None  # type: Optional[Task]
 
         _LOG.info("Starting discovery protocol")
-        if not loop:
-            self.loop = asyncio.get_running_loop()
-        else:
-            self.loop = loop
+        self.loop = asyncio.get_running_loop()
         self.sending_lock = Lock()
 
         self._broadcast_ip = ip_addr
@@ -331,14 +328,13 @@ class DiscoveryService(AbstractDiscoveryService, Listener):
 
 def discovery_service(
     *listeners: Listener,
-    loop: AbstractEventLoop = None,
     ip_addr: str = BROADCAST_IP_ADDR
 ) -> AbstractDiscoveryService:
     """Create discovery service. Returned object is an asynchronous
     context manager so can be used with 'async with' statement.
     Alternately call start_discovery or start_discovery_async to commence
     the discovery process."""
-    service = DiscoveryService(loop=loop, ip_addr=ip_addr)
+    service = DiscoveryService(ip_addr=ip_addr)
     for listener in listeners:
         service.add_listener(listener)
     return service

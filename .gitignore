@@ -385,3 +385,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+.venv_3.10/lib64
+.venv_3.10/pyvenv.cfg

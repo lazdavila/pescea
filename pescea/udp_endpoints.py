@@ -175,7 +175,7 @@ async def open_datagram_endpoint(
     Extra keyword arguments are forwarded to `loop.create_datagram_endpoint`.
     """
     if loop is None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     endpoint = endpoint_factory()
     kwargs["remote_addr" if remote else "local_addr"] = host, port
     kwargs["protocol_factory"] = lambda: DatagramEndpointProtocol(endpoint)
