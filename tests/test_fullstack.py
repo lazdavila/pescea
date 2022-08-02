@@ -247,7 +247,7 @@ async def test_updates_while_busy(mocker):
 
     mocker.patch("pescea.discovery.DISCOVERY_SLEEP", 0.4)
     mocker.patch("pescea.discovery.DISCOVERY_RESCAN", 0.2)
-    mocker.patch("pescea.controller.ON_OFF_BUSY_WAIT_TIME", 1.5)
+    mocker.patch("pescea.controller.ON_OFF_BUSY_WAIT_TIME", 1.2)
     mocker.patch("pescea.controller.REFRESH_INTERVAL", 0.1)
     mocker.patch("pescea.controller.RETRY_INTERVAL", 0.1)
     mocker.patch("pescea.controller.RETRY_TIMEOUT", 0.3)

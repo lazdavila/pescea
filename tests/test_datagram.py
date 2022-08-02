@@ -17,7 +17,7 @@ async def test_search_for_fires(mocker):
         "pescea.udp_endpoints.open_datagram_endpoint", patched_open_datagram_endpoint
     )
 
-    event_loop = asyncio.get_event_loop()
+    event_loop = asyncio.get_running_loop()
     datagram = Datagram(
         event_loop,
         device_ip="255.255.255.255",
@@ -43,7 +43,7 @@ async def test_get_status(mocker):
         "pescea.udp_endpoints.open_datagram_endpoint", patched_open_datagram_endpoint
     )
 
-    event_loop = asyncio.get_event_loop()
+    event_loop = asyncio.get_running_loop()
     uid = list(fireplaces.keys())[0]
     datagram = Datagram(
         event_loop,
@@ -77,7 +77,7 @@ async def test_timeout_error(mocker):
 
     mocker.patch("pescea.datagram.REQUEST_TIMEOUT", 0.3)
 
-    event_loop = asyncio.get_event_loop()
+    event_loop = asyncio.get_running_loop()
     uid = list(fireplaces.keys())[0]
     datagram = Datagram(
         event_loop,
