@@ -289,9 +289,9 @@ class Controller:
             request status
 
             New status received:
-                if prior state READY
+                if prior state READY / NON_RESPONSIVE
                     update local system settings from received message
-                else (prior state DISCONNECTED / NON_RESPONSIVE / BUSY (timeout))
+                else (prior state DISCONNECTED / BUSY (timeout))
                     sync buffered commands to fireplace
                     new state READY
                     if prior state DISCONNECTED:
@@ -323,7 +323,14 @@ class Controller:
                     Controller.Settings.CURRENT_TEMP
                 ] = response.current_temp
 
-                if prior_state == Controller.State.READY:
+                # NON_RESPONSIVE only means we missed some UDP polls (no buffered
+                # user command), so trust the fresh status like READY. Only BUSY
+                # and DISCONNECTED sync buffered commands. Trusting status here is
+                # what stops the relight after an out-of-band (remote) off.
+                if prior_state in (
+                    Controller.State.READY,
+                    Controller.State.NON_RESPONSIVE,
+                ):
 
                     # Normal operation, update our internal values
                     self._system_settings[
@@ -384,23 +391,35 @@ class Controller:
                                 sync=True,
                             )
 
-                    # Do power last, as then we go to BUSY state
-                    if (
-                        response.fire_is_on
-                        != self._system_settings[Controller.Settings.FIRE_IS_ON]
-                    ):
-                        await self._set_system_state(
-                            Controller.Settings.FIRE_IS_ON,
-                            self._system_settings[Controller.Settings.FIRE_IS_ON],
-                            sync=True,
-                        )
+                    # Do power last, as then we go to BUSY state.
+                    # Fail-safe: only ever re-send POWER_OFF here (safe direction);
+                    # never auto-relight a gas fire from a possibly-stale buffer.
+                    # If the buffer says ON but the unit reports OFF, accept OFF.
+                    buffered_on = self._system_settings[Controller.Settings.FIRE_IS_ON]
+                    if response.fire_is_on != buffered_on:
+                        if not buffered_on:
+                            await self._set_system_state(
+                                Controller.Settings.FIRE_IS_ON,
+                                False,
+                                sync=True,
+                            )
+                        else:
+                            self._system_settings[
+                                Controller.Settings.FIRE_IS_ON
+                            ] = response.fire_is_on
 
                     if prior_state == Controller.State.DISCONNECTED:
                         self._discovery.controller_reconnected(self)
 
             else:
-                # No / invalid response, need to check if we need to change state
-                if time() - self._last_response < RETRY_TIMEOUT:
+                # No / invalid response, need to check if we need to change state.
+                # Measure downtime from max(_last_response, _busy_end_time): the
+                # BUSY window (66s) skips polls and freezes _last_response, and
+                # since it exceeds RETRY_TIMEOUT (60s) the first post-toggle miss
+                # would otherwise jump straight to DISCONNECTED. This keeps it
+                # NON_RESPONSIVE (fast retry) instead of going unavailable.
+                last_ok = max(self._last_response, self._busy_end_time)
+                if time() - last_ok < RETRY_TIMEOUT:
                     self._state = Controller.State.NON_RESPONSIVE
                 else:
                     self._state = Controller.State.DISCONNECTED
@@ -490,8 +509,14 @@ class Controller:
         # save the new value internally
         self._system_settings[state] = value
 
-        # send it to the fireplace if asked to sync, or fireplace is not busy
-        if sync or self._state == Controller.State.READY:
+        # Send now if synching, or the controller is READY / NON_RESPONSIVE.
+        # NON_RESPONSIVE is a transient missed-poll state (unit likely still
+        # reachable), so send rather than silently defer to BUSY expiry. A failed
+        # power send still falls through to BUSY below so the intent is protected.
+        if sync or self._state in (
+            Controller.State.READY,
+            Controller.State.NON_RESPONSIVE,
+        ):
 
             command = None
 
@@ -546,7 +571,12 @@ class Controller:
                     pass
                 if valid_response:
                     self._last_response = time()
+                elif state == Controller.Settings.FIRE_IS_ON:
+                    # Power toggle: fall through to BUSY so the buffered state is
+                    # protected and re-sent at BUSY expiry (never orphaned).
+                    pass
                 else:
+                    # temp/fan: a failed send aborts (nothing to protect via BUSY)
                     return
 
             if state == Controller.Settings.FAN_MODE:
@@ -588,12 +618,14 @@ class Controller:
                 else:
                     return
 
+        # For a power toggle enter BUSY *before* the immediate refresh, so the
+        # read is skipped (BUSY guard) instead of clobbering the just-buffered
+        # power state with the unit's stale post-toggle cool-down status.
+        if state == Controller.Settings.FIRE_IS_ON:
+            self._state = Controller.State.BUSY
+            self._busy_end_time = time() + ON_OFF_BUSY_WAIT_TIME
+
         # Need to refresh immediately after setting
         # (unless synching, in which case the poll loop will update)
         if not sync:
             await self._refresh_system()
-
-        # If get here, and just toggled the fireplace power... need to buffer for a while
-        if state == Controller.Settings.FIRE_IS_ON:
-            self._state = Controller.State.BUSY
-            self._busy_end_time = time() + ON_OFF_BUSY_WAIT_TIME
