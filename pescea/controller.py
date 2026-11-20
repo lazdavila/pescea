@@ -122,6 +122,13 @@ class Controller:
 
         self._interrupt_poll_loop_sleep = asyncio.Condition()
 
+        # Settings changed through this controller while the fireplace was not
+        # READY (busy, non-responsive or disconnected). Only these are sent to
+        # the fireplace when it becomes READY again; everything else is taken
+        # from the fireplace's own status, so changes made with the remote or
+        # the Escea app are never overwritten.
+        self._pending_settings = {}  # type: Controller.ControllerData
+
         self._initialised = False
 
     async def initialize(self) -> None:
@@ -348,17 +355,13 @@ class Controller:
                 else:
 
                     # We have come back to READY state.
-                    # We need to try to sync buffered settings to fireplace
+                    # Send only the settings that were changed through this
+                    # controller while the fireplace was not READY. Adopt the
+                    # fireplace's own values for everything else, so a change
+                    # made with the remote or app in the meantime is kept.
 
-                    if (
-                        response.desired_temp
-                        != self._system_settings[Controller.Settings.DESIRED_TEMP]
-                    ):
-                        await self._set_system_state(
-                            Controller.Settings.DESIRED_TEMP,
-                            self._system_settings[Controller.Settings.DESIRED_TEMP],
-                            sync=True,
-                        )
+                    pending = self._pending_settings
+                    self._pending_settings = {}
 
                     if response.fan_boost_is_on:
                         response_fan = Controller.Fan.FAN_BOOST
@@ -366,32 +369,54 @@ class Controller:
                         response_fan = Controller.Fan.FLAME_EFFECT
                     else:
                         response_fan = Controller.Fan.AUTO
-                    if not self._system_settings[Controller.Settings.FIRE_IS_ON]:
+
+                    if Controller.Settings.FIRE_IS_ON not in pending:
+                        self._system_settings[
+                            Controller.Settings.FIRE_IS_ON
+                        ] = response.fire_is_on
+
+                    if (
+                        Controller.Settings.DESIRED_TEMP in pending
+                        and pending[Controller.Settings.DESIRED_TEMP]
+                        != response.desired_temp
+                    ):
+                        await self._set_system_state(
+                            Controller.Settings.DESIRED_TEMP,
+                            pending[Controller.Settings.DESIRED_TEMP],
+                            sync=True,
+                        )
+                    else:
+                        self._system_settings[
+                            Controller.Settings.DESIRED_TEMP
+                        ] = response.desired_temp
+
+                    if (
+                        Controller.Settings.FAN_MODE in pending
+                        and pending[Controller.Settings.FAN_MODE] != response_fan
+                        and self._system_settings[Controller.Settings.FIRE_IS_ON]
+                    ):
                         # Escea controller has a quirk that turning on
-                        # FAN_BOOST or FLAME_EFFECT actually turns on the fire
-                        # ... so must avoid setting fan when 'synching' if want it to stay off
+                        # FAN_BOOST or FLAME_EFFECT actually turns on the fire,
+                        # so the fan is only synced if the fire should be on.
+                        await self._set_system_state(
+                            Controller.Settings.FAN_MODE,
+                            pending[Controller.Settings.FAN_MODE],
+                            sync=True,
+                        )
+                    else:
                         self._system_settings[
                             Controller.Settings.FAN_MODE
                         ] = response_fan
-                    else:
-                        if (
-                            response_fan
-                            != self._system_settings[Controller.Settings.FAN_MODE]
-                        ):
-                            await self._set_system_state(
-                                Controller.Settings.FAN_MODE,
-                                self._system_settings[Controller.Settings.FAN_MODE],
-                                sync=True,
-                            )
 
                     # Do power last, as then we go to BUSY state
                     if (
-                        response.fire_is_on
-                        != self._system_settings[Controller.Settings.FIRE_IS_ON]
+                        Controller.Settings.FIRE_IS_ON in pending
+                        and pending[Controller.Settings.FIRE_IS_ON]
+                        != response.fire_is_on
                     ):
                         await self._set_system_state(
                             Controller.Settings.FIRE_IS_ON,
-                            self._system_settings[Controller.Settings.FIRE_IS_ON],
+                            pending[Controller.Settings.FIRE_IS_ON],
                             sync=True,
                         )
 
@@ -489,6 +514,11 @@ class Controller:
 
         # save the new value internally
         self._system_settings[state] = value
+
+        # Remember it was set while the fireplace couldn't take it, so it is
+        # sent (and only it is sent) once the fireplace is READY again.
+        if not sync and self._state != Controller.State.READY:
+            self._pending_settings[state] = value
 
         # send it to the fireplace if asked to sync, or fireplace is not busy
         if sync or self._state == Controller.State.READY:
